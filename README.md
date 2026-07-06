@@ -140,6 +140,18 @@ let package = Package(
 
 The consuming app must be built with Xcode / `xcodebuild` for the MLX Metal shaders to be available at runtime.
 
+## Future Plans
+
+Roughly in priority order:
+
+- **XGBoost-style gradient boosting**: regularized second-order boosting (gradient + hessian leaf weights, L1/L2 penalties, shrinkage, column/row subsampling), histogram-based split finding, and early stopping — as a separate estimator alongside the current `GradientBoosting`.
+- **Regression support**: put the `Regressor` protocol to work — `LinearRegression`, `DecisionTreeRegressor`, and regression variants of the ensembles, plus regression metrics (MSE, MAE, R²).
+- **Multiclass beyond the discriminant models**: `KNN`, the confusion matrix, and the losses are binary today; extend to multiclass (one-vs-rest where natural) and add a multiclass confusion matrix.
+- **Model selection**: k-fold cross-validation and grid search — the `Hyperparameter` container in Core already reserves the API surface.
+- **Probability everywhere**: `predictProba` on all classifiers (only `LogisticRegression` has it), enabling ROC-AUC and log-loss metrics.
+- **Model persistence**: save/load fitted models (Codable parameters).
+- **SwiftNumerica 0.1.1 adoption**: switch the QDA log-determinant to Cholesky and move `SeededRandomNumberGenerator` upstream once SwiftNumerica ships them.
+
 ## Contribution Guidelines
 
 - Keep `MLXArray` as the data type of every public `fit`/`predict`/`transform` signature.
