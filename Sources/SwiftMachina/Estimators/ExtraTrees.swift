@@ -1,0 +1,70 @@
+import MLX
+
+public struct ExtraTrees: Classifier {
+
+    private var trees: [DecisionTree] = []
+    public let nTrees: Int
+    public let maxDepth: Int
+    public let maxFeatures: Int?
+    public let randomState: UInt64?
+
+    public init(
+        nTrees: Int = 10,
+        maxDepth: Int = 5,
+        maxFeatures: Int? = nil,
+        randomState: UInt64? = nil
+    ) {
+        precondition(nTrees > 0, "nTrees must be greater than zero")
+        precondition(maxDepth >= 0, "maxDepth must be non-negative")
+        if let maxFeatures {
+            precondition(maxFeatures > 0, "maxFeatures must be greater than zero")
+        }
+        self.nTrees = nTrees
+        self.maxDepth = maxDepth
+        self.maxFeatures = maxFeatures
+        self.randomState = randomState
+    }
+
+    public mutating func fit(X: MLXArray, y: MLXArray) {
+        precondition(X.shape.count == 2, "X must be a 2D array")
+        precondition(y.shape[0] == X.shape[0], "X and y must have same number of rows")
+
+        trees = []
+        var rng = randomState.map { SeededRandomNumberGenerator(seed: $0) }
+        let featureCount = X.shape[1]
+        let featuresPerSplit = maxFeatures ?? max(1, Int(Double(featureCount).squareRoot().rounded()))
+
+        for _ in 0..<nTrees {
+
+            let treeSeed = Self.randomUInt64(rng: &rng)
+            var tree = DecisionTree(
+                maxDepth: maxDepth,
+                maxFeatures: min(featuresPerSplit, featureCount),
+                randomThresholds: true,
+                randomState: treeSeed
+            )
+            tree.fit(X: X, y: y)
+
+            trees.append(tree)
+        }
+    }
+
+    public func predict(X: MLXArray) -> MLXArray {
+        precondition(!trees.isEmpty, "ExtraTrees must be fitted before prediction")
+
+        let preds = trees.map { $0.predict(X: X) }
+        let stacked = MLX.stacked(preds, axis: 1)
+
+        let mean = stacked.mean(axis: 1)
+
+        return `where`(mean .> 0.5, MLXArray(1), MLXArray(0))
+            .reshaped([X.shape[0], 1])
+    }
+
+    private static func randomUInt64(rng: inout SeededRandomNumberGenerator?) -> UInt64? {
+        guard var seeded = rng else { return nil }
+        let value = seeded.next()
+        rng = seeded
+        return value
+    }
+}

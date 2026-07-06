@@ -1,0 +1,38 @@
+name: Build
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+
+jobs:
+  build:
+    name: Build (macOS)
+    runs-on: macos-26
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v6
+
+      - name: Show toolchain
+        run: |
+          xcodebuild -version
+          swift --version
+
+      - name: Cache SwiftPM dependencies
+        uses: actions/cache@v4
+        with:
+          path: .build
+          key: ${{ runner.os }}-spm-${{ hashFiles('Package.resolved') }}
+          restore-keys: |
+            ${{ runner.os }}-spm-
+
+      - name: Build (SwiftPM)
+        run: swift build
+
+      # xcodebuild also compiles the Metal shaders and the test bundle.
+      # Tests are built but not run: GitHub-hosted macOS runners have no
+      # usable GPU for MLX (mlx-swift runs its own tests on self-hosted
+      # runners for the same reason).
+      - name: Build for testing (xcodebuild)
+        run: xcodebuild build-for-testing -scheme SwiftMachina-Package -destination 'platform=macOS,arch=arm64'
