@@ -24,7 +24,7 @@ The public API mirrors scikit-learn conventions, adapted to Swift value semantic
 - **Pipeline**: chains transformers and a final model behind one `fit`/`predict`
 - **Metrics**: `Accuracy`, `ConfusionMatrix` (accuracy, precision, recall, F1, specificity, balanced accuracy, MCC)
 - **Losses**: `BinaryCrossEntropy` (with-logits and with-probabilities variants)
-- **Core**: `Estimator`/`Predictor`/`Classifier`/`Regressor`/`Transformer` protocols, `SeededRandomNumberGenerator` (SplitMix64) for reproducibility
+- **Core**: `Estimator`/`Predictor`/`Classifier`/`Regressor`/`Transformer` protocols, `SeededRandomNumberGenerator` (SplitMix64, re-exported from SwiftNumerica) for reproducibility
 
 ## Example Usage
 
@@ -75,7 +75,7 @@ Tests/
 
 - Swift tools 6.3 (Xcode 26) or newer.
 - macOS 26 / iOS 26 or newer, per `Package.swift`.
-- Dependencies: `mlx-swift` 0.31.3+, `SwiftNumerica` 0.1.0+ (resolved automatically).
+- Dependencies: `mlx-swift` 0.31.3+, `SwiftNumerica` 0.1.1+ (resolved automatically).
 
 ## Building And Testing
 
@@ -100,7 +100,7 @@ xcodebuild -scheme SwiftMachinaBenchmarks -destination 'platform=macOS,arch=arm6
 `Sources/SwiftMachina/Core/NumericaBridge.swift` is the single point of contact with SwiftNumerica. It converts small `MLXArray` matrices to SwiftNumerica's `Matrix` (Double) and exposes:
 
 - `numericaInverse(_:)` — LAPACK matrix inversion, used for covariance matrices in `LDA.fit` and `QDA.predict`.
-- `numericaLogDeterminant(symmetric:)` — log-determinant via the sum of log-eigenvalues (stable where a direct determinant would under- or overflow). The input is symmetrized first because Float32 covariance products carry last-bit asymmetry that SwiftNumerica's symmetric eigensolver rejects.
+- `numericaLogDeterminant(symmetric:)` — Cholesky-based log-determinant via SwiftNumerica's `logDeterminant()` (stable where a direct determinant would under- or overflow). The input is symmetrized exactly first because Float32 covariance products can carry asymmetry beyond SwiftNumerica's 1e-6 relative tolerance.
 
 Both return `nil` on degenerate input, and callers fall back to the original MLX CPU ops. This scope is intentional — see the agent rules below.
 
@@ -150,7 +150,6 @@ Roughly in priority order:
 - **Model selection**: k-fold cross-validation and grid search — the `Hyperparameter` container in Core already reserves the API surface.
 - **Probability everywhere**: `predictProba` on all classifiers (only `LogisticRegression` has it), enabling ROC-AUC and log-loss metrics.
 - **Model persistence**: save/load fitted models (Codable parameters).
-- **SwiftNumerica 0.1.1 adoption**: switch the QDA log-determinant to Cholesky and move `SeededRandomNumberGenerator` upstream once SwiftNumerica ships them.
 
 ## Contribution Guidelines
 

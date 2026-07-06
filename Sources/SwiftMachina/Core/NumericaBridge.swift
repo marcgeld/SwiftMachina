@@ -3,7 +3,6 @@
 //  SwiftMachina
 //
 
-import Foundation
 import MLX
 import SwiftNumerica
 
@@ -38,13 +37,12 @@ func numericaInverse(_ array: MLXArray) -> MLXArray? {
 
 // MARK: - Log-determinant
 
-/// log(det(A)) for a symmetric positive-definite matrix via the sum of
-/// log-eigenvalues, which stays stable where a direct determinant would
-/// under- or overflow.
+/// log(det(A)) for a symmetric positive-definite matrix via SwiftNumerica's
+/// Cholesky-based logDeterminant, which stays stable where a direct
+/// determinant would under- or overflow.
 ///
-/// The matrix is symmetrized first: Float32 covariance products can be
-/// asymmetric in the last bits, which SwiftNumerica's symmetric
-/// eigensolver rejects.
+/// The matrix is symmetrized exactly first: Float32 covariance products can
+/// carry asymmetry beyond SwiftNumerica's 1e-6 relative tolerance.
 func numericaLogDeterminant(symmetric array: MLXArray) -> Float? {
     guard let matrix = numericaMatrix(array), matrix.isSquare else {
         return nil
@@ -61,14 +59,8 @@ func numericaLogDeterminant(symmetric array: MLXArray) -> Float? {
     }
 
     guard let symmetrized = Matrix(values: values, rows: n, columns: n),
-          let eigenvalues = symmetrized.eigenvalues() else {
+          let logDet = symmetrized.logDeterminant() else {
         return nil
-    }
-
-    var logDet = 0.0
-    for eigenvalue in eigenvalues {
-        guard eigenvalue > 0 else { return nil }
-        logDet += log(eigenvalue)
     }
     return Float(logDet)
 }

@@ -25,7 +25,7 @@ let package = Package(
     ],
     dependencies: [
         .package(url: "https://github.com/ml-explore/mlx-swift", from: "0.31.3"),
-        .package(url: "https://github.com/marcgeld/SwiftNumerica.git", from: "0.1.0")
+        .package(url: "https://github.com/marcgeld/SwiftNumerica.git", from: "0.1.1")
     ],
     targets: [
         // MARK: - SwiftMachina (ML framework)
