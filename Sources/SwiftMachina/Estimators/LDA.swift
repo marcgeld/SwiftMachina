@@ -46,7 +46,11 @@ public struct LDA: Classifier {
 
         cov /= Float(X.shape[0])
         let reg = Float(1e-6) * MLXArray.eye(X.shape[1])
-        invCov = inv(cov + reg, stream: .cpu)
+        let regularized = cov + reg
+
+        // SwiftNumerica inverts in Double precision; MLX (Float32, also on
+        // the CPU stream) is the fallback for singular input.
+        invCov = numericaInverse(regularized) ?? inv(regularized, stream: .cpu)
     }
 
     // MARK: - Predict

@@ -60,11 +60,19 @@ public struct QDA: Classifier {
             let mean = means[i]
             let cov = covs[i]
 
-            let invCov = inv(cov, stream: .cpu)
+            // SwiftNumerica works in Double precision; MLX (Float32, also
+            // on the CPU stream) is the fallback for degenerate input.
+            let invCov = numericaInverse(cov) ?? inv(cov, stream: .cpu)
 
-            // log(det(cov)) via Cholesky: 2 * sum(log(diag(L)))
-            let L = cholesky(cov, stream: .cpu)
-            let logDet = 2 * log(L.diagonal()).sum()
+            // log(det(cov)) via sum of log-eigenvalues, falling back to
+            // Cholesky: 2 * sum(log(diag(L)))
+            let logDet: MLXArray
+            if let value = numericaLogDeterminant(symmetric: cov) {
+                logDet = MLXArray(value)
+            } else {
+                let L = cholesky(cov, stream: .cpu)
+                logDet = 2 * log(L.diagonal()).sum()
+            }
 
             let diff = X - mean
 

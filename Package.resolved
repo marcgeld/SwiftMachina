@@ -1,5 +1,5 @@
 {
-  "originHash" : "634a1e859ee802725da04cd244f0eea1cd1e5218bce6317bc30f06d15001ffcb",
+  "originHash" : "fbee62dbf54397350fe124dedc099e8b4d98f56358d81d66dd2e800d05254676",
   "pins" : [
     {
       "identity" : "mlx-swift",
@@ -17,6 +17,15 @@
       "state" : {
         "revision" : "0c0290ff6b24942dadb83a929ffaaa1481df04a2",
         "version" : "1.1.1"
+      }
+    },
+    {
+      "identity" : "swiftnumerica",
+      "kind" : "remoteSourceControl",
+      "location" : "https://github.com/marcgeld/SwiftNumerica.git",
+      "state" : {
+        "revision" : "e4e56a1b5dc55e3c127571b96e49770b4d7cefd5",
+        "version" : "0.1.0"
       }
     }
   ],

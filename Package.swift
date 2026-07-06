@@ -24,7 +24,8 @@ let package = Package(
         )
     ],
     dependencies: [
-        .package(url: "https://github.com/ml-explore/mlx-swift", from: "0.31.3")
+        .package(url: "https://github.com/ml-explore/mlx-swift", from: "0.31.3"),
+        .package(url: "https://github.com/marcgeld/SwiftNumerica.git", from: "0.1.0")
     ],
     targets: [
         // MARK: - SwiftMachina (ML framework)
@@ -34,6 +35,7 @@ let package = Package(
                 .product(name: "MLX", package: "mlx-swift"),
                 .product(name: "MLXNN", package: "mlx-swift"),
                 .product(name: "MLXOptimizers", package: "mlx-swift"),
+                .product(name: "SwiftNumerica", package: "SwiftNumerica"),
             ]
         ),
 
