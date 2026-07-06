@@ -71,7 +71,7 @@ struct swiftmlx {
             let y2 = y.reshaped([y.shape[0], 1])
 
             // MARK: - Train/Test split (80/20, stratified, seeded)
-            let splitResult = trainTestSplit(
+            let splitResult = try trainTestSplit(
                 X: X, y: y2,
                 testSize: 0.2,
                 randomState: 42,
@@ -89,19 +89,18 @@ struct swiftmlx {
             let ytestSVM  = 2 * ytest - 1
 
             // MARK: - Models
-            // Names match Python benchtest for compare-swift
             let models: [(String, any Model, MLXArray, MLXArray)] = [
 
                 ("Logistic Regression",
-                 LogisticRegression(inputSize: X.shape[1], epochs: 500, learningRate: 0.01),
+                 try LogisticRegression(inputSize: X.shape[1], epochs: 500, learningRate: 0.01),
                  ytrain, ytest),
 
                 ("SVM (Linear)",
-                 SVM(inputSize: X.shape[1], epochs: 500, learningRate: 0.01),
+                 try SVM(inputSize: X.shape[1], epochs: 500, learningRate: 0.01),
                  ytrainSVM, ytestSVM),
 
                 ("KNN",
-                 KNN(k: 5),
+                 try KNN(k: 5),
                  ytrain, ytest),
 
                 ("Naive Bayes",
@@ -113,23 +112,23 @@ struct swiftmlx {
                  ytrain, ytest),
 
                 ("QDA",
-                 QDA(),
+                 try QDA(),
                  ytrain, ytest),
 
                 ("Decision Tree",
-                 DecisionTree(maxDepth: 5),
+                 try DecisionTree(maxDepth: 5),
                  ytrain, ytest),
 
                 ("Random Forest",
-                 RandomForest(nTrees: 20, maxDepth: 5, randomState: 42),
+                 try RandomForest(nTrees: 20, maxDepth: 5, randomState: 42),
                  ytrain, ytest),
 
                 ("Extra Trees",
-                 ExtraTrees(nTrees: 20, maxDepth: 5, randomState: 42),
+                 try ExtraTrees(nTrees: 20, maxDepth: 5, randomState: 42),
                  ytrain, ytest),
 
                 ("Gradient Boosting",
-                 GradientBoosting(nEstimators: 20, learningRate: 0.1),
+                 try GradientBoosting(nEstimators: 20, learningRate: 0.1),
                  ytrain, ytest)
             ]
 
@@ -142,19 +141,19 @@ struct swiftmlx {
 
                 let model = baseModel
 
-                var pipeline = Pipeline(steps: [
+                var pipeline = try Pipeline(steps: [
                     .transformer(StandardScaler()),
                     .model(model)
                 ])
 
                 // Train (timed)
                 let trainStart = CFAbsoluteTimeGetCurrent()
-                pipeline.fit(X: Xtrain, y: ytr)
+                try pipeline.fit(X: Xtrain, y: ytr)
                 let trainTime = CFAbsoluteTimeGetCurrent() - trainStart
 
                 // Predict (timed)
                 let inferStart = CFAbsoluteTimeGetCurrent()
-                let predsRaw = pipeline.predict(X: Xtest)
+                let predsRaw = try pipeline.predict(X: Xtest)
                 let inferTime = CFAbsoluteTimeGetCurrent() - inferStart
 
                 // Convert predictions for metrics (SVM → 0/1)
@@ -167,7 +166,7 @@ struct swiftmlx {
                     ? `where`(yte .> 0, MLXArray(1), MLXArray(0))
                     : yte
 
-                let cm = ConfusionMatrix().compute(yEval, preds)
+                let cm = try ConfusionMatrix().compute(yEval, preds)
 
                 results.append(ModelResult(
                     name: name,
@@ -190,7 +189,7 @@ struct swiftmlx {
                 """)
             }
 
-            // MARK: - Write metrics.csv (compatible with Python compare-swift)
+            // MARK: - Write metrics.csv (for external benchmark harnesses)
             let header = "Model,Status,Accuracy,Precision,Recall,F1,BalancedAccuracy,Specificity,MCC,AUC,TrainTimeSec,InferenceTimeSec,TN,FP,FN,TP"
 
             var csvLines = [header]
@@ -222,7 +221,7 @@ struct swiftmlx {
             let csvPath = (outputDir as NSString).appendingPathComponent("swift_metrics.csv")
             try csvContent.write(toFile: csvPath, atomically: true, encoding: .utf8)
             print("\n✅ Metrics written to: \(csvPath)")
-            print("   Use: python main.py compare-swift --python-metrics <run>/metrics.csv --swift-metrics \(csvPath)")
+            print("   Use this CSV from an external benchmark harness to compare SwiftMachina against other libraries.")
         }
     }
 }

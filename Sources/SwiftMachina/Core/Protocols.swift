@@ -16,14 +16,14 @@ import MLX
 /// Anything that can be trained on labeled data.
 public protocol Estimator {
     /// Fit the model using training data.
-    mutating func fit(X: MLXArray, y: MLXArray)
+    mutating func fit(X: MLXArray, y: MLXArray) throws
 }
 
 // MARK: - Predictor
 /// Anything that can produce predictions.
 public protocol Predictor {
     /// Predict class labels or values.
-    func predict(X: MLXArray) -> MLXArray
+    func predict(X: MLXArray) throws -> MLXArray
 }
 
 // MARK: - Model
@@ -43,19 +43,19 @@ public protocol Regressor: Model {}
 /// Data preprocessing step (e.g. StandardScaler).
 public protocol Transformer {
     /// Learn parameters from data (e.g. mean/std).
-    mutating func fit(X: MLXArray)
+    mutating func fit(X: MLXArray) throws
 
     /// Apply transformation.
-    func transform(X: MLXArray) -> MLXArray
+    func transform(X: MLXArray) throws -> MLXArray
 
     /// Convenience method (default implementation provided below).
-    mutating func fitTransform(X: MLXArray) -> MLXArray
+    mutating func fitTransform(X: MLXArray) throws -> MLXArray
 }
 
 // Default implementation
 public extension Transformer {
-    mutating func fitTransform(X: MLXArray) -> MLXArray {
-        self.fit(X: X)
-        return self.transform(X: X)
+    mutating func fitTransform(X: MLXArray) throws -> MLXArray {
+        try self.fit(X: X)
+        return try self.transform(X: X)
     }
 }

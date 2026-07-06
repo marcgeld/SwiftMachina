@@ -5,44 +5,306 @@
 //  Created by Marcus Gelderman on 2026-04-28.
 //
 
+import Foundation
 import MLX
 
 public struct GradientBoosting: Classifier {
 
-    private var trees: [DecisionTree] = []
+    private var trees: [RegressionTree] = []
+    private var classValues: [Float] = []
+    private var initialLogOdds: Float = 0
+    private var nFeatures: Int = 0
+
     public let nEstimators: Int
     public let learningRate: Float
+    public let maxDepth: Int
 
-    public init(nEstimators: Int = 10, learningRate: Float = 0.1) {
+    public init(
+        nEstimators: Int = 10,
+        learningRate: Float = 0.1,
+        maxDepth: Int = 3
+    ) throws {
+        try require(nEstimators > 0, .invalidParameter("nEstimators must be greater than zero"))
+        try require(learningRate > 0, .invalidParameter("learningRate must be greater than zero"))
+        try require(maxDepth >= 0, .invalidParameter("maxDepth must be non-negative"))
         self.nEstimators = nEstimators
         self.learningRate = learningRate
+        self.maxDepth = maxDepth
     }
 
-    public mutating func fit(X: MLXArray, y: MLXArray) {
+    public mutating func fit(X: MLXArray, y: MLXArray) throws {
+        try require(X.shape.count == 2, .invalidShape("X must be a 2D array"))
+        try require(y.shape[0] == X.shape[0], .invalidShape("X and y must have same number of rows"))
+        try require(X.shape[0] > 0, .invalidShape("X must contain at least one sample"))
 
-        var residual = y
+        nFeatures = X.shape[1]
+        let xData = X.asArray(Float.self)
+        let yLabels = y.flattened().asArray(Float.self)
+        classValues = Array(Set(yLabels)).sorted()
+        try require(classValues.count == 2, .unsupported("GradientBoosting supports binary classification"))
+
+        let encodedY = yLabels.map { $0 == classValues[1] ? Float(1) : Float(0) }
+        let positiveRate = Self.clamp(encodedY.reduce(0, +) / Float(encodedY.count), min: 1e-6, max: 1 - 1e-6)
+        initialLogOdds = log(positiveRate / (1 - positiveRate))
+
+        var rawScores = Array(repeating: initialLogOdds, count: X.shape[0])
         trees = []
 
         for _ in 0..<nEstimators {
+            let probabilities = rawScores.map(Self.sigmoid)
+            let residuals = zip(encodedY, probabilities).map { target, probability in
+                target - probability
+            }
 
-            var tree = DecisionTree(maxDepth: 3)
-            tree.fit(X: X, y: residual)
+            let tree = RegressionTree.fit(
+                xData: xData,
+                yData: residuals,
+                rows: X.shape[0],
+                cols: nFeatures,
+                maxDepth: maxDepth
+            )
 
-            let pred = tree.predict(X: X)
-            residual = residual - learningRate * pred
+            let updates = tree.predictRows(xData: xData, rows: X.shape[0], cols: nFeatures)
+            for i in rawScores.indices {
+                rawScores[i] += learningRate * updates[i]
+            }
 
             trees.append(tree)
         }
     }
 
-    public func predict(X: MLXArray) -> MLXArray {
+    public func predict(X: MLXArray) throws -> MLXArray {
+        try require(!trees.isEmpty, .notFitted("GradientBoosting must be fitted before prediction"))
+        try require(X.shape.count == 2, .invalidShape("X must be a 2D array"))
+        try require(X.shape[1] == nFeatures, .invalidShape("X must have the same number of features as training data"))
 
-        var sum = MLXArray.zeros([X.shape[0], 1])
+        let xData = X.asArray(Float.self)
+        var rawScores = Array(repeating: initialLogOdds, count: X.shape[0])
 
         for tree in trees {
-            sum += learningRate * tree.predict(X: X)
+            let updates = tree.predictRows(xData: xData, rows: X.shape[0], cols: nFeatures)
+            for i in rawScores.indices {
+                rawScores[i] += learningRate * updates[i]
+            }
         }
 
-        return `where`(sum .> 0.5, MLXArray(1), MLXArray(0))
+        let predictions = rawScores.map { $0 > 0 ? classValues[1] : classValues[0] }
+        return MLXArray(predictions).reshaped([X.shape[0], 1])
+    }
+
+    private static func sigmoid(_ x: Float) -> Float {
+        1 / (1 + exp(-x))
+    }
+
+    private static func clamp(_ value: Float, min lower: Float, max upper: Float) -> Float {
+        Swift.max(lower, Swift.min(value, upper))
+    }
+}
+
+private struct RegressionTree {
+    final class Node {
+        let value: Float
+        let feature: Int?
+        let threshold: Float?
+        let left: Node?
+        let right: Node?
+
+        init(value: Float) {
+            self.value = value
+            self.feature = nil
+            self.threshold = nil
+            self.left = nil
+            self.right = nil
+        }
+
+        init(value: Float, feature: Int, threshold: Float, left: Node, right: Node) {
+            self.value = value
+            self.feature = feature
+            self.threshold = threshold
+            self.left = left
+            self.right = right
+        }
+    }
+
+    let root: Node
+    let maxDepth: Int
+    let minSamplesLeaf: Int
+
+    static func fit(
+        xData: [Float],
+        yData: [Float],
+        rows: Int,
+        cols: Int,
+        maxDepth: Int
+    ) -> RegressionTree {
+        let tree = RegressionTree(
+            root: buildTree(
+                xData: xData,
+                yData: yData,
+                indices: Array(0..<rows),
+                cols: cols,
+                depth: 0,
+                maxDepth: maxDepth,
+                minSamplesLeaf: 1
+            ),
+            maxDepth: maxDepth,
+            minSamplesLeaf: 1
+        )
+        return tree
+    }
+
+    func predictRows(xData: [Float], rows: Int, cols: Int) -> [Float] {
+        (0..<rows).map { row in
+            predictRow(xData: xData, row: row, cols: cols)
+        }
+    }
+
+    private func predictRow(xData: [Float], row: Int, cols: Int) -> Float {
+        var current = root
+
+        while let feature = current.feature,
+              let threshold = current.threshold {
+            let value = xData[row * cols + feature]
+            current = value <= threshold ? current.left! : current.right!
+        }
+
+        return current.value
+    }
+
+    private static func buildTree(
+        xData: [Float],
+        yData: [Float],
+        indices: [Int],
+        cols: Int,
+        depth: Int,
+        maxDepth: Int,
+        minSamplesLeaf: Int
+    ) -> Node {
+        let value = mean(yData: yData, indices: indices)
+
+        if depth >= maxDepth || indices.count <= minSamplesLeaf * 2 {
+            return Node(value: value)
+        }
+
+        guard let split = bestSplit(
+            xData: xData,
+            yData: yData,
+            indices: indices,
+            cols: cols,
+            minSamplesLeaf: minSamplesLeaf
+        ) else {
+            return Node(value: value)
+        }
+
+        var leftIndices: [Int] = []
+        var rightIndices: [Int] = []
+        leftIndices.reserveCapacity(indices.count)
+        rightIndices.reserveCapacity(indices.count)
+
+        for row in indices {
+            if xData[row * cols + split.feature] <= split.threshold {
+                leftIndices.append(row)
+            } else {
+                rightIndices.append(row)
+            }
+        }
+
+        guard !leftIndices.isEmpty, !rightIndices.isEmpty else {
+            return Node(value: value)
+        }
+
+        let left = buildTree(
+            xData: xData,
+            yData: yData,
+            indices: leftIndices,
+            cols: cols,
+            depth: depth + 1,
+            maxDepth: maxDepth,
+            minSamplesLeaf: minSamplesLeaf
+        )
+        let right = buildTree(
+            xData: xData,
+            yData: yData,
+            indices: rightIndices,
+            cols: cols,
+            depth: depth + 1,
+            maxDepth: maxDepth,
+            minSamplesLeaf: minSamplesLeaf
+        )
+
+        return Node(
+            value: value,
+            feature: split.feature,
+            threshold: split.threshold,
+            left: left,
+            right: right
+        )
+    }
+
+    private struct Split {
+        let feature: Int
+        let threshold: Float
+        let loss: Float
+    }
+
+    private static func bestSplit(
+        xData: [Float],
+        yData: [Float],
+        indices: [Int],
+        cols: Int,
+        minSamplesLeaf: Int
+    ) -> Split? {
+        var best: Split?
+
+        for feature in 0..<cols {
+            var rows = indices.map { row in
+                (row: row, value: xData[row * cols + feature], target: yData[row])
+            }
+            rows.sort { $0.value < $1.value }
+
+            let totalSum = rows.reduce(Float(0)) { $0 + $1.target }
+            let totalSquaredSum = rows.reduce(Float(0)) { $0 + $1.target * $1.target }
+            var leftSum: Float = 0
+            var leftSquaredSum: Float = 0
+
+            for i in 0..<(rows.count - 1) {
+                leftSum += rows[i].target
+                leftSquaredSum += rows[i].target * rows[i].target
+
+                let leftN = i + 1
+                let rightN = rows.count - leftN
+                if leftN < minSamplesLeaf || rightN < minSamplesLeaf {
+                    continue
+                }
+
+                let currentValue = rows[i].value
+                let nextValue = rows[i + 1].value
+                if currentValue == nextValue {
+                    continue
+                }
+
+                let rightSum = totalSum - leftSum
+                let rightSquaredSum = totalSquaredSum - leftSquaredSum
+                let leftLoss = leftSquaredSum - (leftSum * leftSum / Float(leftN))
+                let rightLoss = rightSquaredSum - (rightSum * rightSum / Float(rightN))
+                let loss = leftLoss + rightLoss
+
+                if best == nil || loss < best!.loss {
+                    best = Split(
+                        feature: feature,
+                        threshold: (currentValue + nextValue) / 2,
+                        loss: loss
+                    )
+                }
+            }
+        }
+
+        return best
+    }
+
+    private static func mean(yData: [Float], indices: [Int]) -> Float {
+        guard !indices.isEmpty else { return 0 }
+        let sum = indices.reduce(Float(0)) { $0 + yData[$1] }
+        return sum / Float(indices.count)
     }
 }

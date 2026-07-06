@@ -22,10 +22,16 @@ public struct LDA: Classifier {
 
     // MARK: - Fit
 
-    public mutating func fit(X: MLXArray, y: MLXArray) {
+    public mutating func fit(X: MLXArray, y: MLXArray) throws {
+        try require(X.shape.count == 2, .invalidShape("X must be a 2D array"))
+        try require(y.shape[0] == X.shape[0], .invalidShape("X and y must have same number of rows"))
+        try require(X.shape[0] > 0, .invalidShape("X must contain at least one sample"))
 
         let yFlat = y.flattened()
         classes = Array(Set(yFlat.asArray(Float.self))).sorted()
+        means = []
+        priors = []
+        invCov = nil
 
         var cov = MLXArray.zeros([X.shape[1], X.shape[1]])
 
@@ -55,11 +61,13 @@ public struct LDA: Classifier {
 
     // MARK: - Predict
 
-    public func predict(X: MLXArray) -> MLXArray {
+    public func predict(X: MLXArray) throws -> MLXArray {
 
         guard let invCov else {
-            fatalError("LDA not fitted")
+            throw SwiftMachinaError.notFitted("LDA not fitted")
         }
+        try require(X.shape.count == 2, .invalidShape("X must be a 2D array"))
+        try require(X.shape[1] == invCov.shape[0], .invalidShape("X must have the same number of features as training data"))
 
         var scores: [MLXArray] = []
 

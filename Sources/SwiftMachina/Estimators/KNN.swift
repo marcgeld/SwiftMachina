@@ -18,32 +18,35 @@ public struct KNN: Classifier {
 
     private var Xtrain: MLXArray?
     private var ytrain: MLXArray?
+    private var classes: [Float] = []
 
     public let k: Int
 
-    public init(k: Int = 3) {
-        precondition(k > 0, "k must be greater than zero")
+    public init(k: Int = 3) throws {
+        try require(k > 0, .invalidParameter("k must be greater than zero"))
         self.k = k
     }
 
     // MARK: - Fit
-    public mutating func fit(X: MLXArray, y: MLXArray) {
-        precondition(X.shape.count == 2, "X must be a 2D array")
-        precondition(y.shape[0] == X.shape[0], "X and y must have same number of rows")
+    public mutating func fit(X: MLXArray, y: MLXArray) throws {
+        try require(X.shape.count == 2, .invalidShape("X must be a 2D array"))
+        try require(y.shape[0] == X.shape[0], .invalidShape("X and y must have same number of rows"))
+        try require(X.shape[0] > 0, .invalidShape("X must contain at least one sample"))
         self.Xtrain = X
         self.ytrain = y
+        self.classes = Array(Set(y.flattened().asArray(Float.self))).sorted()
     }
 
     // MARK: - Predict (vectorized)
-    public func predict(X: MLXArray) -> MLXArray {
+    public func predict(X: MLXArray) throws -> MLXArray {
 
         guard let Xtrain, let ytrain else {
-            fatalError("KNN not fitted")
+            throw SwiftMachinaError.notFitted("KNN not fitted")
         }
 
-        precondition(X.shape.count == 2, "X must be a 2D array")
-        precondition(X.shape[1] == Xtrain.shape[1], "X must have the same number of features as training data")
-        precondition(k <= Xtrain.shape[0], "k must be less than or equal to the number of training samples")
+        try require(X.shape.count == 2, .invalidShape("X must be a 2D array"))
+        try require(X.shape[1] == Xtrain.shape[1], .invalidShape("X must have the same number of features as training data"))
+        try require(k <= Xtrain.shape[0], .invalidParameter("k must be less than or equal to the number of training samples"))
 
         let nTest = X.shape[0]
 
@@ -71,13 +74,25 @@ public struct KNN: Classifier {
         // Gather labels
         let neighbors = ytrain[kIdx]
 
-        // MARK: - Majority vote (binary)
-        let mean = neighbors.mean(axis: 1)
+        // MARK: - Majority vote
+        let neighborLabels = neighbors.asArray(Float.self)
+        let preds = (0..<nTest).map { row in
+            let start = row * k
+            let rowLabels = Array(neighborLabels[start..<(start + k)])
+            return Self.majorityLabel(rowLabels, classes: classes)
+        }
+        return MLXArray(preds).reshaped([nTest, 1])
+    }
 
-        let preds = `where`(mean .> 0.5,
-                            MLXArray(1),
-                            MLXArray(0))
-
-        return preds.reshaped([nTest, 1])
+    private static func majorityLabel(_ labels: [Float], classes: [Float]) -> Float {
+        var counts: [Float: Int] = [:]
+        for label in labels {
+            counts[label, default: 0] += 1
+        }
+        return classes.max { lhs, rhs in
+            let left = counts[lhs, default: 0]
+            let right = counts[rhs, default: 0]
+            return left == right ? lhs > rhs : left < right
+        }!
     }
 }

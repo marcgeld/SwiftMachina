@@ -32,11 +32,11 @@ public struct BinaryCrossEntropy {
     public func withLogits(
         logits: MLXArray,
         target: MLXArray
-    ) -> MLXArray {
+    ) throws -> MLXArray {
 
-        precondition(
+        try require(
             logits.shape == target.shape,
-            "logits and target must have same shape"
+            .invalidShape("logits and target must have same shape")
         )
 
         let loss =
@@ -56,11 +56,11 @@ public struct BinaryCrossEntropy {
     public func withProbabilities(
         probs: MLXArray,
         target: MLXArray
-    ) -> MLXArray {
+    ) throws -> MLXArray {
 
-        precondition(
+        try require(
             probs.shape == target.shape,
-            "probs and target must have same shape"
+            .invalidShape("probs and target must have same shape")
         )
 
         let eps: Float = 1e-7

@@ -20,12 +20,12 @@ public struct Accuracy {
     public init() {}
 
     // MARK: - Score
-    public func score(_ yTrue: MLXArray, _ yPred: MLXArray) -> Float {
+    public func score(_ yTrue: MLXArray, _ yPred: MLXArray) throws -> Float {
 
         // Ensure shapes are compatible
-        precondition(
+        try require(
             yTrue.shape == yPred.shape,
-            "yTrue and yPred must have the same shape"
+            .invalidShape("yTrue and yPred must have the same shape")
         )
 
         // Compare element-wise (1 if equal, 0 otherwise)

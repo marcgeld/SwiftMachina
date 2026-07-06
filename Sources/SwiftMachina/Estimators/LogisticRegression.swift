@@ -23,10 +23,10 @@ public struct LogisticRegression: Estimator, Predictor {
         inputSize: Int,
         epochs: Int = 500,
         learningRate: Float = 0.01
-    ) {
-        precondition(inputSize > 0, "inputSize must be greater than zero")
-        precondition(epochs >= 0, "epochs must be non-negative")
-        precondition(learningRate > 0, "learningRate must be greater than zero")
+    ) throws {
+        try require(inputSize > 0, .invalidParameter("inputSize must be greater than zero"))
+        try require(epochs >= 0, .invalidParameter("epochs must be non-negative"))
+        try require(learningRate > 0, .invalidParameter("learningRate must be greater than zero"))
         self.inputSize = inputSize
         self.epochs = epochs
         self.learningRate = learningRate
@@ -39,19 +39,19 @@ public struct LogisticRegression: Estimator, Predictor {
     }
 
     // MARK: - Fit (protocol conformance)
-    public mutating func fit(X: MLXArray, y: MLXArray) {
-        fit(X: X, y: y, verbose: false)
+    public mutating func fit(X: MLXArray, y: MLXArray) throws {
+        try fit(X: X, y: y, verbose: false)
     }
 
     // MARK: - Fit
-    public mutating func fit(X: MLXArray, y: MLXArray, verbose: Bool) {
+    public mutating func fit(X: MLXArray, y: MLXArray, verbose: Bool) throws {
 
-        precondition(X.shape.count == 2 && X.shape[1] == inputSize,
-                     "X must have shape [N, inputSize]")
-        precondition(y.shape.count == 2 && y.shape[1] == 1,
-                     "y must have shape [N, 1]")
-        precondition(y.shape[0] == X.shape[0],
-                     "X and y must have same number of rows")
+        try require(X.shape.count == 2 && X.shape[1] == inputSize,
+                    .invalidShape("X must have shape [N, inputSize]"))
+        try require(y.shape.count == 2 && y.shape[1] == 1,
+                    .invalidShape("y must have shape [N, 1]"))
+        try require(y.shape[0] == X.shape[0],
+                    .invalidShape("X and y must have same number of rows"))
 
         let optimizer = SGD(learningRate: learningRate)
 
@@ -76,15 +76,15 @@ public struct LogisticRegression: Estimator, Predictor {
     }
 
     // MARK: - Predict probabilities
-    public func predictProba(X: MLXArray) -> MLXArray {
-        precondition(X.shape.count == 2 && X.shape[1] == inputSize,
-                     "X must have shape [N, inputSize]")
+    public func predictProba(X: MLXArray) throws -> MLXArray {
+        try require(X.shape.count == 2 && X.shape[1] == inputSize,
+                    .invalidShape("X must have shape [N, inputSize]"))
         return sigmoid(forward(X))
     }
 
     // MARK: - Predict classes (0/1)
-    public func predict(X: MLXArray) -> MLXArray {
-        let probs = predictProba(X: X)
+    public func predict(X: MLXArray) throws -> MLXArray {
+        let probs = try predictProba(X: X)
         return probs .> 0.5
     }
 

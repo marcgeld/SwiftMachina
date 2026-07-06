@@ -18,16 +18,23 @@ public struct QDA: Classifier {
     private var priors: [Float] = []
     private let regParam: Float
 
-    public init(regParam: Float = 0.0) {
+    public init(regParam: Float = 0.0) throws {
+        try require(regParam >= 0 && regParam <= 1, .invalidParameter("regParam must be in [0, 1]"))
         self.regParam = regParam
     }
 
     // MARK: - Fit
 
-    public mutating func fit(X: MLXArray, y: MLXArray) {
+    public mutating func fit(X: MLXArray, y: MLXArray) throws {
+        try require(X.shape.count == 2, .invalidShape("X must be a 2D array"))
+        try require(y.shape[0] == X.shape[0], .invalidShape("X and y must have same number of rows"))
+        try require(X.shape[0] > 0, .invalidShape("X must contain at least one sample"))
 
         let yFlat = y.flattened()
         classes = Array(Set(yFlat.asArray(Float.self))).sorted()
+        means = []
+        covs = []
+        priors = []
 
         for c in classes {
 
@@ -51,7 +58,10 @@ public struct QDA: Classifier {
 
     // MARK: - Predict
 
-    public func predict(X: MLXArray) -> MLXArray {
+    public func predict(X: MLXArray) throws -> MLXArray {
+        try require(!classes.isEmpty, .notFitted("QDA must be fitted before prediction"))
+        try require(X.shape.count == 2, .invalidShape("X must be a 2D array"))
+        try require(X.shape[1] == covs[0].shape[0], .invalidShape("X must have the same number of features as training data"))
 
         var scores: [MLXArray] = []
 

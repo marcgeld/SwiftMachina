@@ -17,16 +17,24 @@ public struct GaussianNaiveBayes: Classifier {
     private var means: [MLXArray] = []
     private var variances: [MLXArray] = []
     private var priors: [Float] = []
+    private var nFeatures: Int = 0
 
     private let epsilon: Float = 1e-8
 
     public init() {}
 
     // MARK: - Fit
-    public mutating func fit(X: MLXArray, y: MLXArray) {
+    public mutating func fit(X: MLXArray, y: MLXArray) throws {
+        try require(X.shape.count == 2, .invalidShape("X must be a 2D array"))
+        try require(y.shape[0] == X.shape[0], .invalidShape("X and y must have same number of rows"))
+        try require(X.shape[0] > 0, .invalidShape("X must contain at least one sample"))
 
         let yFlat = y.flattened()
         classes = Array(Set(yFlat.asArray(Float.self))).sorted()
+        means = []
+        variances = []
+        priors = []
+        nFeatures = X.shape[1]
 
         for c in classes {
 
@@ -45,7 +53,10 @@ public struct GaussianNaiveBayes: Classifier {
     }
 
     // MARK: - Predict
-    public func predict(X: MLXArray) -> MLXArray {
+    public func predict(X: MLXArray) throws -> MLXArray {
+        try require(!classes.isEmpty, .notFitted("GaussianNaiveBayes must be fitted before prediction"))
+        try require(X.shape.count == 2, .invalidShape("X must be a 2D array"))
+        try require(X.shape[1] == nFeatures, .invalidShape("X must have the same number of features as training data"))
 
         var scores: [MLXArray] = []
 

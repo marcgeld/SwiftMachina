@@ -45,9 +45,13 @@ public func trainTestSplit(
     testSize: Double = 0.2,
     randomState: UInt64 = 42,
     stratify: Bool = true
-) -> TrainTestSplitResult {
+) throws -> TrainTestSplitResult {
+    try require(X.shape.count == 2, .invalidShape("X must be a 2D array"))
+    try require(y.shape[0] == X.shape[0], .invalidShape("X and y must have same number of rows"))
+    try require(testSize > 0 && testSize < 1, .invalidParameter("testSize must be in (0, 1)"))
 
     let n = X.shape[0]
+    try require(n > 1, .invalidSplit("trainTestSplit requires at least two samples"))
     var rng = SeededRandomNumberGenerator(seed: randomState)
 
     let yFlat = y.reshaped([-1])
@@ -70,6 +74,7 @@ public func trainTestSplit(
             indices.shuffle(using: &rng)
 
             let nTest = Int((Double(indices.count) * testSize).rounded())
+            try require(nTest > 0 && nTest < indices.count, .invalidSplit("Each class must have at least one train and one test sample"))
             testIndices.append(contentsOf: indices.prefix(nTest))
             trainIndices.append(contentsOf: indices.dropFirst(nTest))
         }
@@ -77,6 +82,7 @@ public func trainTestSplit(
         var indices = Array(0..<n)
         indices.shuffle(using: &rng)
         let nTest = Int((Double(n) * testSize).rounded())
+        try require(nTest > 0 && nTest < n, .invalidSplit("Split must produce at least one train and one test sample"))
         testIndices = Array(indices.prefix(nTest))
         trainIndices = Array(indices.dropFirst(nTest))
     }

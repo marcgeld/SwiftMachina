@@ -13,13 +13,13 @@ Two deliberate exceptions leave the MLX graph:
 - **Tree building** (`DecisionTree` and the ensembles built on it) is inherently branchy, sequential work and is implemented in plain Swift on `[Float]` buffers.
 - **Small-matrix linear algebra** (features × features covariance work in `LDA`/`QDA`) goes through SwiftNumerica's LAPACK-backed routines in **Double precision** via the internal `NumericaBridge`. MLX would run these on the CPU stream anyway, and Double is strictly better for covariance inversion. MLX Float32 ops remain as fallback for degenerate input.
 
-The correctness baseline is **scikit-learn**: the test suite includes parity tests that compare estimator behavior against sklearn results on the breast-cancer dataset. The full sklearn benchmark suite lives in a separate repository.
+Correctness inside this package is covered by Swift-native unit, regression, determinism, and API-contract tests. Cross-library parity and performance comparison against scikit-learn and other machine-learning libraries belongs in a separate benchmark harness that imports SwiftMachina as a dependency.
 
-The public API mirrors scikit-learn conventions, adapted to Swift value semantics: estimators are `struct`s, `fit` is `mutating`, and there are no reference-type model objects.
+The public API mirrors scikit-learn conventions, adapted to Swift value semantics: estimators are `struct`s, `fit` is `mutating`, and there are no reference-type model objects. Recoverable misuse such as invalid shapes, invalid hyperparameters, or predicting before fitting is reported by throwing `SwiftMachinaError`.
 
 ## What's Implemented
 
-- **Estimators**: `LogisticRegression` (MLXNN + SGD), `SVM` (linear, hinge loss), `KNN` (vectorized distance matrix), `DecisionTree` (CART, gini), `RandomForest`, `ExtraTrees`, `GradientBoosting`, `GaussianNaiveBayes`, `LDA`, `QDA`
+- **Estimators**: `LogisticRegression` (MLXNN + SGD), `SVM` (linear, hinge loss), `KNN` (vectorized distance matrix + majority vote), `DecisionTree` (CART, gini), `RandomForest`, `ExtraTrees`, `GradientBoosting` (binary log-loss boosting with regression trees), `GaussianNaiveBayes`, `LDA`, `QDA`
 - **Preprocessing**: `StandardScaler`, `trainTestSplit` (stratified, seeded — mirrors sklearn's `train_test_split(random_state:stratify:)`)
 - **Pipeline**: chains transformers and a final model behind one `fit`/`predict`
 - **Metrics**: `Accuracy`, `ConfusionMatrix` (accuracy, precision, recall, F1, specificity, balanced accuracy, MCC)
@@ -35,18 +35,18 @@ import SwiftMachina
 // X: [N, features], y: [N, 1] — Float32 MLXArrays
 
 // Stratified, seeded 80/20 split
-let split = trainTestSplit(X: X, y: y, testSize: 0.2, randomState: 42, stratify: true)
+let split = try trainTestSplit(X: X, y: y, testSize: 0.2, randomState: 42, stratify: true)
 
 // Standardize + classify in one pipeline
-var pipeline = Pipeline(steps: [
+var pipeline = try Pipeline(steps: [
     .transformer(StandardScaler()),
-    .model(LogisticRegression(inputSize: X.shape[1]))
+    .model(try LogisticRegression(inputSize: X.shape[1]))
 ])
-pipeline.fit(X: split.Xtrain, y: split.ytrain)
-let predictions = pipeline.predict(X: split.Xtest)
+try pipeline.fit(X: split.Xtrain, y: split.ytrain)
+let predictions = try pipeline.predict(X: split.Xtest)
 
 // Evaluate
-let cm = ConfusionMatrix().compute(split.ytest, predictions)
+let cm = try ConfusionMatrix().compute(split.ytest, predictions)
 print("accuracy: \(cm.accuracy), F1: \(cm.f1), MCC: \(cm.mcc)")
 ```
 
@@ -68,7 +68,7 @@ Sources/
 ├── SwiftMachinaExample     (executable: breast-cancer walkthrough)
 └── SwiftMachinaBenchmarks  (executable: synthetic-data benchmarks)
 Tests/
-└── SwiftMachinaTests       (Swift Testing: unit + sklearn parity tests)
+└── SwiftMachinaTests       (Swift Testing: unit, regression, determinism, and API-contract tests)
 ```
 
 ## Requirements
@@ -87,7 +87,7 @@ swift build
 **Running requires Xcode's build system.** Command-line SwiftPM cannot build MLX's Metal shaders, so `swift test` and `swift run` compile fine but crash at runtime with `Failed to load the default metallib`. This is a documented mlx-swift limitation, not a bug in this package. Use `xcodebuild`:
 
 ```bash
-# Run the test suite (unit + parity tests)
+# Run the test suite
 xcodebuild test -scheme SwiftMachina-Package -destination 'platform=macOS,arch=arm64'
 
 # Run the example / benchmarks
@@ -157,7 +157,7 @@ Roughly in priority order:
 - Keep `MLXArray` as the data type of every public `fit`/`predict`/`transform` signature.
 - Estimators are value types; `fit` is `mutating`; no reference-type model objects.
 - Follow the sklearn naming conventions already in place (`fit`, `predict`, `predictProba`, `fitTransform`, `randomState`, `testSize`).
-- Every estimator change must keep the parity tests green — they are the ground truth for numerical behavior.
+- Keep the Swift-native tests green and add focused coverage for changed behavior, edge cases, determinism, and recoverable errors.
 - Randomized code must accept an optional seed and produce identical results for identical seeds (`SeededRandomNumberGenerator`).
 - Use Swift Testing (`@Test`, `#expect`) for new coverage.
 - Update this README whenever architecture, modules, or design decisions change.
@@ -169,6 +169,5 @@ README.md is the authoritative architecture document. If implementation and READ
 - **Never verify with `swift test` or `swift run`** — they crash at runtime on the missing metallib (see Building And Testing). Always verify with `xcodebuild test -scheme SwiftMachina-Package -destination 'platform=macOS,arch=arm64'`. Do not treat the metallib crash as a code bug and do not try to "fix" it in this package.
 - **Dataset-sized math stays on MLX.** Do not route per-sample or per-feature-column computation through SwiftNumerica, CPU loops, or Accelerate — it would leave the GPU and break the lazy-evaluation model. The only sanctioned CPU exceptions are tree building and `NumericaBridge`.
 - **SwiftNumerica is for small features × features matrices only**, accessed exclusively through `NumericaBridge`. Widen that bridge only when SwiftNumerica gains a capability this package needs (e.g. Cholesky); do not scatter direct `SwiftNumerica` imports across estimators.
-- **The parity tests define correctness.** A change that alters predictions must be justified against scikit-learn behavior, not just compile.
+- **Cross-library parity stays outside this repo.** Comparison against scikit-learn, XGBoost, LightGBM, CatBoost, Create ML, or other libraries belongs in a separate benchmark harness that imports SwiftMachina. Do not add Python tooling or generated Python fixtures to this package.
 - **Do not add dataset/file-format assumptions to the library.** CSV/TabularData loading belongs in examples and consuming apps, never in `Sources/SwiftMachina`.
-- The Python/sklearn benchmark suite lives in a separate repository — do not re-add Python tooling here.

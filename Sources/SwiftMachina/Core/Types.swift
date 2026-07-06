@@ -7,6 +7,38 @@
 
 import MLX
 
+// MARK: - Errors
+
+/// Recoverable API errors thrown for invalid inputs, invalid parameters, and
+/// calls made before an estimator or transformer has been fitted.
+public enum SwiftMachinaError: Error, Equatable, CustomStringConvertible {
+    case invalidParameter(String)
+    case invalidShape(String)
+    case notFitted(String)
+    case unsupported(String)
+    case invalidPipeline(String)
+    case invalidSplit(String)
+
+    public var description: String {
+        switch self {
+        case .invalidParameter(let message),
+             .invalidShape(let message),
+             .notFitted(let message),
+             .unsupported(let message),
+             .invalidPipeline(let message),
+             .invalidSplit(let message):
+            return message
+        }
+    }
+}
+
+@inline(__always)
+func require(_ condition: @autoclosure () -> Bool, _ error: SwiftMachinaError) throws {
+    guard condition() else {
+        throw error
+    }
+}
+
 // MARK: - Task Types
 
 /// Describes the type of ML problem.

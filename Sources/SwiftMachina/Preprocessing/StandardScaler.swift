@@ -22,9 +22,9 @@ public struct StandardScaler: Transformer {
     public init() {}
 
     // MARK: - Fit
-    public mutating func fit(X: MLXArray) {
+    public mutating func fit(X: MLXArray) throws {
 
-        precondition(X.shape.count == 2, "X must be 2D [N, features]")
+        try require(X.shape.count == 2, .invalidShape("X must be 2D [N, features]"))
 
         // mean över samples (axis 0)
         let mean = X.mean(axis: 0)
@@ -40,35 +40,39 @@ public struct StandardScaler: Transformer {
     }
 
     // MARK: - Transform
-    public func transform(X: MLXArray) -> MLXArray {
+    public func transform(X: MLXArray) throws -> MLXArray {
 
         guard let mean, let std else {
-            fatalError("StandardScaler not fitted. Call fit() first.")
+            throw SwiftMachinaError.notFitted("StandardScaler not fitted. Call fit() first.")
         }
 
+        try require(X.shape.count == 2, .invalidShape("X must be 2D [N, features]"))
+        try require(X.shape[1] == mean.shape[0], .invalidShape("X must have the same number of features as fitted data"))
         return (X - mean) / std
     }
 
     // MARK: - Fit + Transform
-    public mutating func fitTransform(X: MLXArray) -> MLXArray {
-        self.fit(X: X)
-        return self.transform(X: X)
+    public mutating func fitTransform(X: MLXArray) throws -> MLXArray {
+        try self.fit(X: X)
+        return try self.transform(X: X)
     }
 
     // MARK: - Inverse Transform (valfri men bra att ha)
-    public func inverseTransform(X: MLXArray) -> MLXArray {
+    public func inverseTransform(X: MLXArray) throws -> MLXArray {
 
         guard let mean, let std else {
-            fatalError("StandardScaler not fitted.")
+            throw SwiftMachinaError.notFitted("StandardScaler not fitted.")
         }
 
+        try require(X.shape.count == 2, .invalidShape("X must be 2D [N, features]"))
+        try require(X.shape[1] == mean.shape[0], .invalidShape("X must have the same number of features as fitted data"))
         return X * std + mean
     }
 
     // MARK: - Debug / inspection
-    public func parameters() -> (mean: MLXArray, std: MLXArray) {
+    public func parameters() throws -> (mean: MLXArray, std: MLXArray) {
         guard let mean, let std else {
-            fatalError("StandardScaler not fitted.")
+            throw SwiftMachinaError.notFitted("StandardScaler not fitted.")
         }
         return (mean, std)
     }

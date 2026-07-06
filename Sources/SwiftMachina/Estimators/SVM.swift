@@ -37,11 +37,11 @@ public struct SVM: Estimator, Predictor {
         epochs: Int = 500,
         learningRate: Float = 0.01,
         lambda: Float = 0.01
-    ) {
-        precondition(inputSize > 0, "inputSize must be greater than zero")
-        precondition(epochs >= 0, "epochs must be non-negative")
-        precondition(learningRate > 0, "learningRate must be greater than zero")
-        precondition(lambda >= 0, "lambda must be non-negative")
+    ) throws {
+        try require(inputSize > 0, .invalidParameter("inputSize must be greater than zero"))
+        try require(epochs >= 0, .invalidParameter("epochs must be non-negative"))
+        try require(learningRate > 0, .invalidParameter("learningRate must be greater than zero"))
+        try require(lambda >= 0, .invalidParameter("lambda must be non-negative"))
         self.inputSize = inputSize
         self.epochs = epochs
         self.learningRate = learningRate
@@ -55,8 +55,8 @@ public struct SVM: Estimator, Predictor {
     }
 
     // MARK: - Fit (protocol conformance)
-    public mutating func fit(X: MLXArray, y: MLXArray) {
-        fit(X: X, y: y, verbose: false)
+    public mutating func fit(X: MLXArray, y: MLXArray) throws {
+        try fit(X: X, y: y, verbose: false)
     }
 
     // MARK: - Training (fit)
@@ -64,18 +64,18 @@ public struct SVM: Estimator, Predictor {
         X: MLXArray,
         y: MLXArray,
         verbose: Bool
-    ) {
-        precondition(
+    ) throws {
+        try require(
             X.shape.count == 2 && X.shape[1] == inputSize,
-            "X must have shape [N, inputSize]"
+            .invalidShape("X must have shape [N, inputSize]")
         )
-        precondition(
+        try require(
             y.shape.count == 2 && y.shape[1] == 1,
-            "y must have shape [N, 1]"
+            .invalidShape("y must have shape [N, 1]")
         )
-        precondition(
+        try require(
             y.shape[0] == X.shape[0],
-            "X and y must have same number of rows"
+            .invalidShape("X and y must have same number of rows")
         )
 
         let optimizer = SGD(learningRate: learningRate)
@@ -101,10 +101,10 @@ public struct SVM: Estimator, Predictor {
     }
 
     // MARK: - Prediction
-    public func predict(X: MLXArray) -> MLXArray {
-        precondition(
+    public func predict(X: MLXArray) throws -> MLXArray {
+        try require(
             X.shape.count == 2 && X.shape[1] == inputSize,
-            "X must have shape [N, inputSize]"
+            .invalidShape("X must have shape [N, inputSize]")
         )
         let logits = forward(X)
         return `where`(logits .> 0,
@@ -113,10 +113,10 @@ public struct SVM: Estimator, Predictor {
     }
 
     // MARK: - Decision function
-    public func decisionFunction(X: MLXArray) -> MLXArray {
-        precondition(
+    public func decisionFunction(X: MLXArray) throws -> MLXArray {
+        try require(
             X.shape.count == 2 && X.shape[1] == inputSize,
-            "X must have shape [N, inputSize]"
+            .invalidShape("X must have shape [N, inputSize]")
         )
         return forward(X)
     }

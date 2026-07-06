@@ -73,11 +73,11 @@ public struct ConfusionMatrix {
     }
 
     // MARK: - Compute
-    public func compute(_ yTrue: MLXArray, _ yPred: MLXArray) -> Result {
+    public func compute(_ yTrue: MLXArray, _ yPred: MLXArray) throws -> Result {
 
-        precondition(
+        try require(
             yTrue.shape == yPred.shape,
-            "yTrue and yPred must have the same shape"
+            .invalidShape("yTrue and yPred must have the same shape")
         )
 
         // Normalize labels to {0,1}

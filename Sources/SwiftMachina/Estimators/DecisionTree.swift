@@ -66,12 +66,12 @@ public struct DecisionTree: Classifier {
         maxFeatures: Int? = nil,
         randomThresholds: Bool = false,
         randomState: UInt64? = nil
-    ) {
-        precondition(maxDepth >= 0, "maxDepth must be non-negative")
-        precondition(minSamplesSplit >= 2, "minSamplesSplit must be at least 2")
-        precondition(minSamplesLeaf >= 1, "minSamplesLeaf must be at least 1")
+    ) throws {
+        try require(maxDepth >= 0, .invalidParameter("maxDepth must be non-negative"))
+        try require(minSamplesSplit >= 2, .invalidParameter("minSamplesSplit must be at least 2"))
+        try require(minSamplesLeaf >= 1, .invalidParameter("minSamplesLeaf must be at least 1"))
         if let maxFeatures {
-            precondition(maxFeatures > 0, "maxFeatures must be greater than zero")
+            try require(maxFeatures > 0, .invalidParameter("maxFeatures must be greater than zero"))
         }
         self.maxDepth = maxDepth
         self.minSamplesSplit = minSamplesSplit
@@ -84,11 +84,12 @@ public struct DecisionTree: Classifier {
 
     // MARK: - Fit
 
-    public mutating func fit(X: MLXArray, y: MLXArray) {
-        precondition(X.shape.count == 2, "X must be a 2D array")
-        precondition(y.shape[0] == X.shape[0], "X and y must have same number of rows")
+    public mutating func fit(X: MLXArray, y: MLXArray) throws {
+        try require(X.shape.count == 2, .invalidShape("X must be a 2D array"))
+        try require(y.shape[0] == X.shape[0], .invalidShape("X and y must have same number of rows"))
 
         let nSamples = X.shape[0]
+        try require(nSamples > 0, .invalidShape("X must contain at least one sample"))
         nFeatures = X.shape[1]
 
         let xData = X.asArray(Float.self)
@@ -110,9 +111,12 @@ public struct DecisionTree: Classifier {
 
     // MARK: - Predict
 
-    public func predict(X: MLXArray) -> MLXArray {
-        precondition(X.shape.count == 2, "X must be a 2D array")
-        precondition(root != nil, "DecisionTree must be fitted before prediction")
+    public func predict(X: MLXArray) throws -> MLXArray {
+        try require(X.shape.count == 2, .invalidShape("X must be a 2D array"))
+        guard let root else {
+            throw SwiftMachinaError.notFitted("DecisionTree must be fitted before prediction")
+        }
+        try require(X.shape[1] == nFeatures, .invalidShape("X must have the same number of features as training data"))
 
         let rows = X.shape[0]
         let cols = X.shape[1]
@@ -123,7 +127,7 @@ public struct DecisionTree: Classifier {
                 xData: xData,
                 row: row,
                 cols: cols,
-                node: root!
+                node: root
             )
         }
 

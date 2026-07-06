@@ -18,12 +18,22 @@ public struct Pipeline {
 
     private var steps: [PipelineStep]
 
-    public init(steps: [PipelineStep]) {
+    public init(steps: [PipelineStep]) throws {
+        try require(!steps.isEmpty, .invalidPipeline("Pipeline must contain at least one step"))
+        for step in steps.dropLast() {
+            if case .model = step {
+                throw SwiftMachinaError.invalidPipeline("Pipeline model must be the final step")
+            }
+        }
+        if case .model = steps.last! {
+        } else {
+            throw SwiftMachinaError.invalidPipeline("Pipeline must end with a model")
+        }
         self.steps = steps
     }
 
     // MARK: - Fit
-    public mutating func fit(X: MLXArray, y: MLXArray) {
+    public mutating func fit(X: MLXArray, y: MLXArray) throws {
 
         var Xcurrent = X
 
@@ -32,19 +42,20 @@ public struct Pipeline {
             switch steps[i] {
 
             case .transformer(var t):
-                t.fit(X: Xcurrent)
-                Xcurrent = t.transform(X: Xcurrent)
+                try t.fit(X: Xcurrent)
+                Xcurrent = try t.transform(X: Xcurrent)
                 steps[i] = .transformer(t) // write back (value semantics)
 
             case .model(var m):
-                m.fit(X: Xcurrent, y: y)
+                try m.fit(X: Xcurrent, y: y)
                 steps[i] = .model(m)
+                return
             }
         }
     }
 
     // MARK: - Predict
-    public func predict(X: MLXArray) -> MLXArray {
+    public func predict(X: MLXArray) throws -> MLXArray {
 
         var Xcurrent = X
 
@@ -53,13 +64,13 @@ public struct Pipeline {
             switch step {
 
             case .transformer(let t):
-                Xcurrent = t.transform(X: Xcurrent)
+                Xcurrent = try t.transform(X: Xcurrent)
 
             case .model(let m):
-                return m.predict(X: Xcurrent)
+                return try m.predict(X: Xcurrent)
             }
         }
 
-        fatalError("Pipeline must end with a model")
+        throw SwiftMachinaError.invalidPipeline("Pipeline must end with a model")
     }
 }
