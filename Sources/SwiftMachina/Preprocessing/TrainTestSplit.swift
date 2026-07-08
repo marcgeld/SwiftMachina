@@ -36,7 +36,7 @@ public func trainTestSplit(
     stratify: Bool = true
 ) throws -> TrainTestSplitResult {
     try require(X.shape.count == 2, .invalidShape("X must be a 2D array"))
-    try require(y.shape[0] == X.shape[0], .invalidShape("X and y must have same number of rows"))
+    try requireLabelVector(y, rows: X.shape[0])
     try require(testSize > 0 && testSize < 1, .invalidParameter("testSize must be in (0, 1)"))
 
     let n = X.shape[0]

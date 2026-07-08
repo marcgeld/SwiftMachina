@@ -26,7 +26,7 @@ public struct GaussianNaiveBayes: Classifier {
     // MARK: - Fit
     public mutating func fit(X: MLXArray, y: MLXArray) throws {
         try require(X.shape.count == 2, .invalidShape("X must be a 2D array"))
-        try require(y.shape[0] == X.shape[0], .invalidShape("X and y must have same number of rows"))
+        try requireLabelVector(y, rows: X.shape[0])
         try require(X.shape[0] > 0, .invalidShape("X must contain at least one sample"))
 
         let yFlat = y.flattened()

@@ -39,6 +39,23 @@ func require(_ condition: @autoclosure () -> Bool, _ error: SwiftMachinaError) t
     }
 }
 
+func requireLabelVector(
+    _ y: MLXArray,
+    rows: Int,
+    name: String = "y",
+    rowError: String? = nil
+) throws {
+    let shape = y.shape
+    try require(
+        shape.count == 1 || (shape.count == 2 && shape[1] == 1),
+        .invalidShape("\(name) must be 1D [N] or 2D [N, 1]")
+    )
+    try require(
+        shape[0] == rows,
+        .invalidShape(rowError ?? "X and \(name) must have same number of rows")
+    )
+}
+
 // MARK: - Task Types
 
 /// Describes the type of ML problem.

@@ -287,6 +287,22 @@ struct ThrowingAPITests {
 
         #expect(didThrow)
     }
+
+    @Test func fitRejectsMatrixLabels() throws {
+        let X = MLXArray([Float](repeating: 1.0, count: 8)).reshaped([4, 2])
+        let y = MLXArray([0.0, 1.0, 0.0, 1.0, 0.0, 1.0, 0.0, 1.0] as [Float]).reshaped([4, 2])
+        var model = try KNN(k: 1)
+        var didThrow = false
+
+        do {
+            try model.fit(X: X, y: y)
+        } catch {
+            didThrow = true
+            #expect((error as? SwiftMachinaError) == .invalidShape("y must be 1D [N] or 2D [N, 1]"))
+        }
+
+        #expect(didThrow)
+    }
 }
 
 // MARK: - Model Smoke Tests
@@ -529,6 +545,25 @@ struct GradientBoostingTests {
         #expect(try Accuracy().score(y, preds) >= 0.95)
         #expect(Set(floatValues(preds)) == Set<Float>([2.0, 3.0]))
     }
+
+    @Test func failedRefitPreservesFittedState() throws {
+        let (X, y) = makeTwoClusterData(leftLabel: 0, rightLabel: 1)
+        let invalidY = MLXArray([Float](repeating: 1.0, count: X.shape[0])).reshaped([X.shape[0], 1])
+        var model = try GradientBoosting(nEstimators: 20, learningRate: 0.2)
+
+        try model.fit(X: X, y: y)
+
+        var didThrow = false
+        do {
+            try model.fit(X: X, y: invalidY)
+        } catch {
+            didThrow = true
+            #expect((error as? SwiftMachinaError) == .unsupported("GradientBoosting supports binary classification"))
+        }
+
+        #expect(didThrow)
+        #expect(try Accuracy().score(y, try model.predict(X: X)) >= 0.95)
+    }
 }
 
 @Suite("XGBoost", CPUDeviceTrait())
@@ -622,6 +657,40 @@ struct XGBoostTests {
         }
 
         #expect(didThrow)
+    }
+
+    @Test func evalXWithoutEvalYThrows() throws {
+        let (X, y) = makeLinearData(n: 20)
+        var model = try XGBoostClassifier(nEstimators: 3)
+        var didThrow = false
+
+        do {
+            try model.fit(X: X, y: y, evalX: X, evalY: nil, earlyStoppingRounds: nil)
+        } catch {
+            didThrow = true
+            #expect((error as? SwiftMachinaError) == .invalidParameter("evalX and evalY must be provided together"))
+        }
+
+        #expect(didThrow)
+    }
+
+    @Test func failedRefitPreservesFittedState() throws {
+        let (X, y) = makeTwoClusterData(leftLabel: 0, rightLabel: 1)
+        let invalidY = MLXArray([Float](repeating: 1.0, count: X.shape[0])).reshaped([X.shape[0], 1])
+        var model = try XGBoostClassifier(nEstimators: 20, learningRate: 0.3, maxDepth: 3)
+
+        try model.fit(X: X, y: y)
+
+        var didThrow = false
+        do {
+            try model.fit(X: X, y: invalidY)
+        } catch {
+            didThrow = true
+            #expect((error as? SwiftMachinaError) == .unsupported("XGBoostClassifier supports binary classification"))
+        }
+
+        #expect(didThrow)
+        #expect(try Accuracy().score(y, try model.predict(X: X)) >= 0.95)
     }
 }
 

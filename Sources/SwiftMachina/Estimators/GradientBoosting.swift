@@ -34,21 +34,25 @@ public struct GradientBoosting: Classifier {
 
     public mutating func fit(X: MLXArray, y: MLXArray) throws {
         try require(X.shape.count == 2, .invalidShape("X must be a 2D array"))
-        try require(y.shape[0] == X.shape[0], .invalidShape("X and y must have same number of rows"))
+        try requireLabelVector(y, rows: X.shape[0])
         try require(X.shape[0] > 0, .invalidShape("X must contain at least one sample"))
 
-        nFeatures = X.shape[1]
+        let fittedFeatureCount = X.shape[1]
         let xData = X.asArray(Float.self)
         let yLabels = y.flattened().asArray(Float.self)
-        classValues = Array(Set(yLabels)).sorted()
-        try require(classValues.count == 2, .unsupported("GradientBoosting supports binary classification"))
+        let fittedClassValues = Array(Set(yLabels)).sorted()
+        try require(fittedClassValues.count == 2, .unsupported("GradientBoosting supports binary classification"))
 
-        let encodedY = yLabels.map { $0 == classValues[1] ? Float(1) : Float(0) }
+        let encodedY = yLabels.map { $0 == fittedClassValues[1] ? Float(1) : Float(0) }
         let positiveRate = Self.clamp(encodedY.reduce(0, +) / Float(encodedY.count), min: 1e-6, max: 1 - 1e-6)
-        initialLogOdds = log(positiveRate / (1 - positiveRate))
+        let fittedInitialLogOdds = log(positiveRate / (1 - positiveRate))
 
-        var rawScores = Array(repeating: initialLogOdds, count: X.shape[0])
+        nFeatures = fittedFeatureCount
+        classValues = fittedClassValues
+        initialLogOdds = fittedInitialLogOdds
         trees = []
+
+        var rawScores = Array(repeating: fittedInitialLogOdds, count: X.shape[0])
 
         for _ in 0..<nEstimators {
             let probabilities = rawScores.map(Self.sigmoid)
@@ -60,11 +64,11 @@ public struct GradientBoosting: Classifier {
                 xData: xData,
                 yData: residuals,
                 rows: X.shape[0],
-                cols: nFeatures,
+                cols: fittedFeatureCount,
                 maxDepth: maxDepth
             )
 
-            let updates = tree.predictRows(xData: xData, rows: X.shape[0], cols: nFeatures)
+            let updates = tree.predictRows(xData: xData, rows: X.shape[0], cols: fittedFeatureCount)
             for i in rawScores.indices {
                 rawScores[i] += learningRate * updates[i]
             }

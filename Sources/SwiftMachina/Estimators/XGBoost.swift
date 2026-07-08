@@ -112,47 +112,54 @@ public struct XGBoostClassifier: Classifier {
         earlyStoppingRounds: Int?
     ) throws {
         try require(X.shape.count == 2, .invalidShape("X must be a 2D array"))
-        try require(y.shape[0] == X.shape[0], .invalidShape("X and y must have same number of rows"))
+        try requireLabelVector(y, rows: X.shape[0])
         try require(X.shape[0] > 0, .invalidShape("X must contain at least one sample"))
+        try require((evalX == nil) == (evalY == nil), .invalidParameter("evalX and evalY must be provided together"))
         if earlyStoppingRounds != nil {
             try require(earlyStoppingRounds! > 0, .invalidParameter("earlyStoppingRounds must be greater than zero"))
             try require(evalX != nil && evalY != nil, .invalidParameter("earlyStoppingRounds requires evalX and evalY"))
         }
 
         let rows = X.shape[0]
-        nFeatures = X.shape[1]
+        let fittedFeatureCount = X.shape[1]
         let xData = X.asArray(Float.self)
         let yLabels = y.flattened().asArray(Float.self)
 
-        classValues = Array(Set(yLabels)).sorted()
-        try require(classValues.count == 2, .unsupported("XGBoostClassifier supports binary classification"))
-        let encodedY = yLabels.map { $0 == classValues[1] ? Float(1) : Float(0) }
+        let fittedClassValues = Array(Set(yLabels)).sorted()
+        try require(fittedClassValues.count == 2, .unsupported("XGBoostClassifier supports binary classification"))
+        let encodedY = yLabels.map { $0 == fittedClassValues[1] ? Float(1) : Float(0) }
 
-        if let evalX {
-            try require(evalX.shape.count == 2 && evalX.shape[1] == nFeatures,
+        if let evalX, let evalY {
+            try require(evalX.shape.count == 2 && evalX.shape[1] == fittedFeatureCount,
                         .invalidShape("evalX must have the same number of features as X"))
-            try require(evalY!.shape[0] == evalX.shape[0],
-                        .invalidShape("evalX and evalY must have same number of rows"))
+            try require(evalX.shape[0] > 0, .invalidShape("evalX must contain at least one sample"))
+            try requireLabelVector(evalY, rows: evalX.shape[0], name: "evalY", rowError: "evalX and evalY must have same number of rows")
+            let evalLabels = Set(evalY.flattened().asArray(Float.self))
+            try require(evalLabels.isSubset(of: Set(fittedClassValues)),
+                        .invalidParameter("evalY labels must be present in y"))
         }
 
         let positiveRate = Self.clamp(encodedY.reduce(0, +) / Float(rows), min: 1e-6, max: 1 - 1e-6)
-        baseScore = log(positiveRate / (1 - positiveRate))
+        let fittedBaseScore = log(positiveRate / (1 - positiveRate))
+        nFeatures = fittedFeatureCount
+        classValues = fittedClassValues
+        baseScore = fittedBaseScore
         trees = []
         bestIteration = nil
 
         // Bin features once: quantile cut points, then row-major bin indices.
-        let cuts = Self.quantileCuts(xData: xData, rows: rows, cols: nFeatures, maxBins: maxBins)
-        let bins = Self.binRows(xData: xData, rows: rows, cols: nFeatures, cuts: cuts)
+        let cuts = Self.quantileCuts(xData: xData, rows: rows, cols: fittedFeatureCount, maxBins: maxBins)
+        let bins = Self.binRows(xData: xData, rows: rows, cols: fittedFeatureCount, cuts: cuts)
 
         var rng = randomState.map { SeededRandomNumberGenerator(seed: $0) }
-        var margins = Array(repeating: baseScore, count: rows)
+        var margins = Array(repeating: fittedBaseScore, count: rows)
 
         // Early stopping state
         let evalData = evalX.map { ($0.asArray(Float.self), $0.shape[0]) }
         let evalTargets = evalY.map { array in
-            array.flattened().asArray(Float.self).map { $0 == classValues[1] ? Float(1) : Float(0) }
+            array.flattened().asArray(Float.self).map { $0 == fittedClassValues[1] ? Float(1) : Float(0) }
         }
-        var evalMargins = evalData.map { Array(repeating: baseScore, count: $0.1) }
+        var evalMargins = evalData.map { Array(repeating: fittedBaseScore, count: $0.1) }
         var bestLoss = Float.infinity
         var bestRound = -1
 
@@ -176,7 +183,7 @@ public struct XGBoostClassifier: Classifier {
             }
 
             let sampledRows = sampleIndices(count: rows, fraction: subsample, rng: &rng)
-            let sampledFeatures = sampleIndices(count: nFeatures, fraction: colsampleByTree, rng: &rng)
+            let sampledFeatures = sampleIndices(count: fittedFeatureCount, fraction: colsampleByTree, rng: &rng)
 
             let tree = builder.build(
                 bins: bins,
@@ -185,18 +192,18 @@ public struct XGBoostClassifier: Classifier {
                 h: h,
                 indices: sampledRows,
                 features: sampledFeatures,
-                cols: nFeatures
+                cols: fittedFeatureCount
             )
             trees.append(tree)
 
             for i in 0..<rows {
-                margins[i] += learningRate * tree.predictRow(xData: xData, row: i, cols: nFeatures)
+                margins[i] += learningRate * tree.predictRow(xData: xData, row: i, cols: fittedFeatureCount)
             }
 
             // Early stopping on eval log loss
             if let earlyStoppingRounds, let (evalX, evalRows) = evalData, let targets = evalTargets {
                 for i in 0..<evalRows {
-                    evalMargins![i] += learningRate * tree.predictRow(xData: evalX, row: i, cols: nFeatures)
+                    evalMargins![i] += learningRate * tree.predictRow(xData: evalX, row: i, cols: fittedFeatureCount)
                 }
                 let loss = Self.logLoss(margins: evalMargins!, targets: targets)
                 if loss < bestLoss {

@@ -69,14 +69,8 @@ public struct SVM: Estimator, Predictor {
             X.shape.count == 2 && X.shape[1] == inputSize,
             .invalidShape("X must have shape [N, inputSize]")
         )
-        try require(
-            y.shape.count == 2 && y.shape[1] == 1,
-            .invalidShape("y must have shape [N, 1]")
-        )
-        try require(
-            y.shape[0] == X.shape[0],
-            .invalidShape("X and y must have same number of rows")
-        )
+        try requireLabelVector(y, rows: X.shape[0])
+        let yTrain = y.shape.count == 1 ? y.reshaped([X.shape[0], 1]) : y
 
         let optimizer = SGD(learningRate: learningRate)
         let lambda = self.lambda
@@ -90,7 +84,7 @@ public struct SVM: Estimator, Predictor {
         }
 
         for epoch in 0..<epochs {
-            let (loss, grads) = lg(linear, X, y)
+            let (loss, grads) = lg(linear, X, yTrain)
             optimizer.update(model: linear, gradients: grads)
             MLX.eval(linear)
 
