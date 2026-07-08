@@ -104,3 +104,50 @@ public struct QDA: Classifier {
         return MLXArray(preds).reshaped([X.shape[0], 1])
     }
 }
+
+extension QDA: FittedStatePersistable {
+    public struct FittedState: Codable {
+        public let schemaVersion: Int
+        public let modelType: String
+        public let regParam: Float
+        public let classes: [Float]
+        public let means: [SwiftMachinaArray]
+        public let covs: [SwiftMachinaArray]
+        public let priors: [Float]
+    }
+
+    public func fittedState() throws -> FittedState {
+        try require(!classes.isEmpty, .notFitted("QDA must be fitted before saving"))
+        return FittedState(
+            schemaVersion: 1,
+            modelType: "QDA",
+            regParam: regParam,
+            classes: classes,
+            means: means.map(SwiftMachinaArray.init),
+            covs: covs.map(SwiftMachinaArray.init),
+            priors: priors
+        )
+    }
+
+    public init(fittedState: FittedState) throws {
+        try requireFittedState(
+            schemaVersion: fittedState.schemaVersion,
+            modelType: fittedState.modelType,
+            expectedModelType: "QDA"
+        )
+        try require(fittedState.regParam >= 0 && fittedState.regParam <= 1, .invalidParameter("regParam must be in [0, 1]"))
+        try require(!fittedState.classes.isEmpty, .notFitted("QDA fitted state must contain classes"))
+        try require(
+            fittedState.means.count == fittedState.classes.count &&
+            fittedState.covs.count == fittedState.classes.count &&
+            fittedState.priors.count == fittedState.classes.count,
+            .invalidShape("QDA fitted state arrays must match class count")
+        )
+
+        self.regParam = fittedState.regParam
+        self.classes = fittedState.classes
+        self.means = try fittedState.means.map { try $0.mlxArray() }
+        self.covs = try fittedState.covs.map { try $0.mlxArray() }
+        self.priors = fittedState.priors
+    }
+}

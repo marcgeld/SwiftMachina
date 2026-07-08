@@ -96,3 +96,49 @@ public struct KNN: Classifier {
         }!
     }
 }
+
+extension KNN: FittedStatePersistable {
+    public struct FittedState: Codable {
+        public let schemaVersion: Int
+        public let modelType: String
+        public let k: Int
+        public let xTrain: SwiftMachinaArray
+        public let yTrain: SwiftMachinaArray
+        public let classes: [Float]
+    }
+
+    public func fittedState() throws -> FittedState {
+        guard let Xtrain, let ytrain else {
+            throw SwiftMachinaError.notFitted("KNN must be fitted before saving")
+        }
+
+        return FittedState(
+            schemaVersion: 1,
+            modelType: "KNN",
+            k: k,
+            xTrain: SwiftMachinaArray(Xtrain),
+            yTrain: SwiftMachinaArray(ytrain),
+            classes: classes
+        )
+    }
+
+    public init(fittedState: FittedState) throws {
+        try requireFittedState(
+            schemaVersion: fittedState.schemaVersion,
+            modelType: fittedState.modelType,
+            expectedModelType: "KNN"
+        )
+        try require(fittedState.k > 0, .invalidParameter("k must be greater than zero"))
+
+        let xTrain = try fittedState.xTrain.mlxArray()
+        let yTrain = try fittedState.yTrain.mlxArray()
+        try require(xTrain.shape.count == 2, .invalidShape("xTrain must be a 2D array"))
+        try requireLabelVector(yTrain, rows: xTrain.shape[0], name: "yTrain")
+        try require(xTrain.shape[0] > 0, .invalidShape("xTrain must contain at least one sample"))
+
+        self.k = fittedState.k
+        self.Xtrain = xTrain
+        self.ytrain = yTrain
+        self.classes = fittedState.classes
+    }
+}

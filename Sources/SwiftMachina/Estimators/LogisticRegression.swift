@@ -14,6 +14,7 @@ public struct LogisticRegression: Estimator, Predictor {
 
     // MARK: - Properties
     private var linear: Linear
+    private var isFitted: Bool = false
     public let inputSize: Int
     public let epochs: Int
     public let learningRate: Float
@@ -71,10 +72,13 @@ public struct LogisticRegression: Estimator, Predictor {
                 print("Epoch \(epoch), loss: \(loss.item(Float.self))")
             }
         }
+
+        isFitted = true
     }
 
     // MARK: - Predict probabilities
     public func predictProba(X: MLXArray) throws -> MLXArray {
+        try require(isFitted, .notFitted("LogisticRegression must be fitted before prediction"))
         try require(X.shape.count == 2 && X.shape[1] == inputSize,
                     .invalidShape("X must have shape [N, inputSize]"))
         return sigmoid(forward(X))
@@ -89,5 +93,50 @@ public struct LogisticRegression: Estimator, Predictor {
     // MARK: - Weights access (debug / analys)
     public func weights() -> (W: MLXArray, b: MLXArray?) {
         (linear.weight, linear.bias)
+    }
+}
+
+extension LogisticRegression: FittedStatePersistable {
+    public struct FittedState: Codable {
+        public let schemaVersion: Int
+        public let modelType: String
+        public let inputSize: Int
+        public let epochs: Int
+        public let learningRate: Float
+        public let weight: SwiftMachinaArray
+        public let bias: SwiftMachinaArray?
+    }
+
+    public func fittedState() throws -> FittedState {
+        try require(isFitted, .notFitted("LogisticRegression must be fitted before saving"))
+        return FittedState(
+            schemaVersion: 1,
+            modelType: "LogisticRegression",
+            inputSize: inputSize,
+            epochs: epochs,
+            learningRate: learningRate,
+            weight: SwiftMachinaArray(linear.weight),
+            bias: linear.bias.map(SwiftMachinaArray.init)
+        )
+    }
+
+    public init(fittedState: FittedState) throws {
+        try requireFittedState(
+            schemaVersion: fittedState.schemaVersion,
+            modelType: fittedState.modelType,
+            expectedModelType: "LogisticRegression"
+        )
+        try require(fittedState.inputSize > 0, .invalidParameter("inputSize must be greater than zero"))
+        try require(fittedState.epochs >= 0, .invalidParameter("epochs must be non-negative"))
+        try require(fittedState.learningRate > 0, .invalidParameter("learningRate must be greater than zero"))
+
+        self.inputSize = fittedState.inputSize
+        self.epochs = fittedState.epochs
+        self.learningRate = fittedState.learningRate
+        self.linear = Linear(
+            weight: try fittedState.weight.mlxArray(),
+            bias: try fittedState.bias?.mlxArray()
+        )
+        self.isFitted = true
     }
 }

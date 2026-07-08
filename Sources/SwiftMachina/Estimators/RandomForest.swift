@@ -80,3 +80,41 @@ public struct RandomForest: Classifier {
         return Int.random(in: range)
     }
 }
+
+extension RandomForest: FittedStatePersistable {
+    public struct FittedState: Codable {
+        public let schemaVersion: Int
+        public let modelType: String
+        public let nTrees: Int
+        public let maxDepth: Int
+        public let randomState: UInt64?
+        public let trees: [DecisionTree.FittedState]
+    }
+
+    public func fittedState() throws -> FittedState {
+        try require(!trees.isEmpty, .notFitted("RandomForest must be fitted before saving"))
+        return FittedState(
+            schemaVersion: 1,
+            modelType: "RandomForest",
+            nTrees: nTrees,
+            maxDepth: maxDepth,
+            randomState: randomState,
+            trees: try trees.map { try $0.fittedState() }
+        )
+    }
+
+    public init(fittedState: FittedState) throws {
+        try requireFittedState(
+            schemaVersion: fittedState.schemaVersion,
+            modelType: fittedState.modelType,
+            expectedModelType: "RandomForest"
+        )
+        try self.init(
+            nTrees: fittedState.nTrees,
+            maxDepth: fittedState.maxDepth,
+            randomState: fittedState.randomState
+        )
+        try require(!fittedState.trees.isEmpty, .notFitted("RandomForest fitted state must contain trees"))
+        self.trees = try fittedState.trees.map { try DecisionTree(fittedState: $0) }
+    }
+}

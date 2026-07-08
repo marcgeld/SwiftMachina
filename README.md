@@ -24,7 +24,8 @@ The public API mirrors scikit-learn conventions, adapted to Swift value semantic
 - **Pipeline**: chains transformers and a final model behind one `fit`/`predict`
 - **Metrics**: `Accuracy`, `ConfusionMatrix` (accuracy, precision, recall, F1, specificity, balanced accuracy, MCC)
 - **Losses**: `BinaryCrossEntropy` (with-logits and with-probabilities variants)
-- **Core**: `Estimator`/`Predictor`/`Classifier`/`Regressor`/`Transformer` protocols, `SeededRandomNumberGenerator` (SplitMix64, re-exported from SwiftNumerica) for reproducibility
+- **Persistence**: JSON fitted-state save/load for all current estimators through `FittedStatePersistable`
+- **Core**: `Estimator`/`Predictor`/`Classifier`/`Regressor`/`Transformer` protocols, `SwiftMachinaArray`, `SeededRandomNumberGenerator` (SplitMix64, re-exported from SwiftNumerica) for reproducibility
 
 ## Example Usage
 
@@ -48,16 +49,40 @@ let predictions = try pipeline.predict(X: split.Xtest)
 // Evaluate
 let cm = try ConfusionMatrix().compute(split.ytest, predictions)
 print("accuracy: \(cm.accuracy), F1: \(cm.f1), MCC: \(cm.mcc)")
+
+// Save and load the complete fitted model state as portable JSON
+var persistedModel = try LogisticRegression(inputSize: X.shape[1])
+try persistedModel.fit(X: split.Xtrain, y: split.ytrain)
+try persistedModel.saveFittedState(to: URL(fileURLWithPath: "logistic-regression.json"))
+let loaded = try LogisticRegression.loadFittedState(from: URL(fileURLWithPath: "logistic-regression.json"))
+let loadedPredictions = try loaded.predict(X: split.Xtest)
 ```
 
-A complete, runnable version of this workflow (CSV loading via TabularData, all eleven estimators compared, timings) lives in [Sources/SwiftMachinaExample](Sources/SwiftMachinaExample).
+A complete, runnable version of this workflow (CSV loading via TabularData, all eleven estimators compared, timings) lives in [Sources/SwiftMachinaExample](Sources/SwiftMachinaExample). A much smaller synthetic-data walkthrough for every estimator, including JSON fitted-state save/load round trips, lives in [Sources/SwiftMachinaMiniExamples](Sources/SwiftMachinaMiniExamples).
+
+## Fitted-State Persistence
+
+Every current estimator implements `FittedStatePersistable`:
+
+```swift
+var model = try RandomForest(nTrees: 20, maxDepth: 4, randomState: 42)
+try model.fit(X: xTrain, y: yTrain)
+try model.saveFittedState(to: URL(fileURLWithPath: "forest.json"))
+
+let restored = try RandomForest.loadFittedState(from: URL(fileURLWithPath: "forest.json"))
+let predictions = try restored.predict(X: xTest)
+```
+
+The JSON artifacts include `schemaVersion`, `modelType`, hyperparameters, and the complete learned state: fitted weights, class statistics, memorized KNN samples, or explicit tree nodes depending on the estimator. Array payloads use `SwiftMachinaArray`, a simple row-major `{ shape, values }` representation intended to be easy to decode from Python, Swift apps, and CoreML-hosting apps.
+
+This is not yet a CoreML `.mlmodel` exporter. It is the stable fitted-state layer that a separate Python benchmark/conversion project or future CoreML converter can consume.
 
 ## Package Structure
 
 ```text
 Sources/
 ├── SwiftMachina
-│   ├── Core          (protocols, shared types, NumericaBridge)
+│   ├── Core          (protocols, persistence, shared types, NumericaBridge)
 │   ├── Estimators    (LogisticRegression, SVM, KNN, DecisionTree,
 │   │                  RandomForest, ExtraTrees, GradientBoosting,
 │   │                  XGBoost, GaussianNaiveBayes, LDA, QDA)
@@ -66,6 +91,7 @@ Sources/
 │   ├── Metrics       (Accuracy, ConfusionMatrix)
 │   └── Losses        (BinaryCrossEntropy)
 ├── SwiftMachinaExample     (executable: breast-cancer walkthrough)
+├── SwiftMachinaMiniExamples (executable: tiny synthetic fitted-state round trips)
 └── SwiftMachinaBenchmarks  (executable: synthetic-data benchmarks)
 Tests/
 └── SwiftMachinaTests       (Swift Testing: unit, regression, determinism, and API-contract tests)
@@ -92,6 +118,7 @@ xcodebuild test -scheme SwiftMachina-Package -destination 'platform=macOS,arch=a
 
 # Run the example / benchmarks
 xcodebuild -scheme SwiftMachinaExample -destination 'platform=macOS,arch=arm64' build
+xcodebuild -scheme SwiftMachinaMiniExamples -destination 'platform=macOS,arch=arm64' build
 xcodebuild -scheme SwiftMachinaBenchmarks -destination 'platform=macOS,arch=arm64' build
 ```
 
@@ -148,7 +175,7 @@ Roughly in priority order:
 - **Multiclass beyond the discriminant models**: `KNN`, the confusion matrix, and the losses are binary today; extend to multiclass (one-vs-rest where natural) and add a multiclass confusion matrix.
 - **Model selection**: k-fold cross-validation and grid search — the `Hyperparameter` container in Core already reserves the API surface.
 - **Probability everywhere**: `predictProba` on all classifiers (only `LogisticRegression` has it), enabling ROC-AUC and log-loss metrics.
-- **Model persistence**: save/load fitted models (Codable parameters).
+- **CoreML export/conversion**: map persisted fitted-state JSON into `.mlmodel` artifacts where the target estimator has a practical CoreML representation.
 
 ## Contribution Guidelines
 

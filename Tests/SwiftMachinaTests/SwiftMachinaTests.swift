@@ -1,3 +1,4 @@
+import Foundation
 import Testing
 import MLX
 @testable import SwiftMachina
@@ -62,6 +63,28 @@ private func splitData(_ X: MLXArray, _ y: MLXArray, trainRatio: Double = 0.8)
 
 private func floatValues(_ array: MLXArray) -> [Float] {
     array.asType(.float32).asArray(Float.self)
+}
+
+private func temporaryJSONURL(_ prefix: String) -> URL {
+    FileManager.default.temporaryDirectory
+        .appendingPathComponent("\(prefix)-\(UUID().uuidString).json")
+}
+
+private func assertFittedStateRoundTrip<Model>(
+    _ model: Model,
+    X: MLXArray,
+    filePrefix: String = String(describing: Model.self)
+) throws where Model: Predictor & FittedStatePersistable {
+    let url = temporaryJSONURL(filePrefix)
+    defer { try? FileManager.default.removeItem(at: url) }
+
+    try model.saveFittedState(to: url)
+    let loaded = try Model.loadFittedState(from: url)
+
+    #expect(
+        floatValues(try loaded.predict(X: X)) == floatValues(try model.predict(X: X)),
+        "\(filePrefix) loaded predictions should match original fitted predictions"
+    )
 }
 
 struct CPUDeviceTrait: SuiteTrait, TestTrait, TestScoping {
@@ -691,6 +714,119 @@ struct XGBoostTests {
 
         #expect(didThrow)
         #expect(try Accuracy().score(y, try model.predict(X: X)) >= 0.95)
+    }
+}
+
+// MARK: - Fitted State Persistence Tests
+
+@Suite("Fitted state persistence", CPUDeviceTrait())
+struct FittedStatePersistenceTests {
+
+    @Test func logisticRegressionRoundTripsFittedWeights() throws {
+        let (X, y) = makeLinearData(n: 40)
+        var model = try LogisticRegression(inputSize: 2, epochs: 40, learningRate: 0.1)
+
+        try model.fit(X: X, y: y)
+
+        try assertFittedStateRoundTrip(model, X: X)
+    }
+
+    @Test func svmRoundTripsFittedWeights() throws {
+        let (X, y) = makeLinearData(n: 40)
+        let ySigned = 2 * y - 1
+        var model = try SVM(inputSize: 2, epochs: 40, learningRate: 0.1)
+
+        try model.fit(X: X, y: ySigned)
+
+        try assertFittedStateRoundTrip(model, X: X)
+    }
+
+    @Test func knnRoundTripsTrainingMemory() throws {
+        let (X, y) = makeLinearData(n: 40)
+        var model = try KNN(k: 3)
+
+        try model.fit(X: X, y: y)
+
+        try assertFittedStateRoundTrip(model, X: X)
+    }
+
+    @Test func gaussianNaiveBayesRoundTripsParameters() throws {
+        let (X, y) = makeLinearData(n: 40)
+        var model = GaussianNaiveBayes()
+
+        try model.fit(X: X, y: y)
+
+        try assertFittedStateRoundTrip(model, X: X)
+    }
+
+    @Test func ldaRoundTripsParameters() throws {
+        let (X, y) = makeLinearData(n: 40)
+        var model = LDA()
+
+        try model.fit(X: X, y: y)
+
+        try assertFittedStateRoundTrip(model, X: X)
+    }
+
+    @Test func qdaRoundTripsParameters() throws {
+        let (X, y) = makeLinearData(n: 40)
+        var model = try QDA(regParam: 0.1)
+
+        try model.fit(X: X, y: y)
+
+        try assertFittedStateRoundTrip(model, X: X)
+    }
+
+    @Test func decisionTreeRoundTripsNodes() throws {
+        let (X, y) = makeLinearData(n: 40)
+        var model = try DecisionTree(maxDepth: 3)
+
+        try model.fit(X: X, y: y)
+
+        try assertFittedStateRoundTrip(model, X: X)
+    }
+
+    @Test func randomForestRoundTripsTrees() throws {
+        let (X, y) = makeLinearData(n: 40)
+        var model = try RandomForest(nTrees: 5, maxDepth: 3, randomState: 123)
+
+        try model.fit(X: X, y: y)
+
+        try assertFittedStateRoundTrip(model, X: X)
+    }
+
+    @Test func extraTreesRoundTripsTrees() throws {
+        let (X, y) = makeLinearData(n: 40)
+        var model = try ExtraTrees(nTrees: 5, maxDepth: 3, randomState: 123)
+
+        try model.fit(X: X, y: y)
+
+        try assertFittedStateRoundTrip(model, X: X)
+    }
+
+    @Test func gradientBoostingRoundTripsTrees() throws {
+        let (X, y) = makeLinearData(n: 60)
+        var model = try GradientBoosting(nEstimators: 10, learningRate: 0.2, maxDepth: 2)
+
+        try model.fit(X: X, y: y)
+
+        try assertFittedStateRoundTrip(model, X: X)
+    }
+
+    @Test func xgBoostRoundTripsTreesAndProbabilities() throws {
+        let (X, y) = makeLinearData(n: 60)
+        var model = try XGBoostClassifier(nEstimators: 10, learningRate: 0.3, maxDepth: 2, randomState: 123)
+
+        try model.fit(X: X, y: y)
+
+        try assertFittedStateRoundTrip(model, X: X)
+
+        let url = temporaryJSONURL("XGBoostClassifier-proba")
+        defer { try? FileManager.default.removeItem(at: url) }
+        try model.saveFittedState(to: url)
+        let loaded = try XGBoostClassifier.loadFittedState(from: url)
+
+        #expect(floatValues(try loaded.predictProba(X: X)) == floatValues(try model.predictProba(X: X)))
     }
 }
 

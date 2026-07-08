@@ -19,6 +19,10 @@ let package = Package(
             targets: ["SwiftMachinaExample"]
         ),
         .executable(
+            name: "SwiftMachinaMiniExamples",
+            targets: ["SwiftMachinaMiniExamples"]
+        ),
+        .executable(
             name: "SwiftMachinaBenchmarks",
             targets: ["SwiftMachinaBenchmarks"]
         )
@@ -53,6 +57,15 @@ let package = Package(
             ],
             resources: [
                 .process("Resources")
+            ]
+        ),
+
+        // MARK: - Mini examples
+        .executableTarget(
+            name: "SwiftMachinaMiniExamples",
+            dependencies: [
+                "SwiftMachina",
+                .product(name: "MLX", package: "mlx-swift"),
             ]
         ),
 

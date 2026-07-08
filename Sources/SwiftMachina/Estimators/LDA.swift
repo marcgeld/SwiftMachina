@@ -89,3 +89,48 @@ public struct LDA: Classifier {
         return MLXArray(preds).reshaped([X.shape[0], 1])
     }
 }
+
+extension LDA: FittedStatePersistable {
+    public struct FittedState: Codable {
+        public let schemaVersion: Int
+        public let modelType: String
+        public let classes: [Float]
+        public let means: [SwiftMachinaArray]
+        public let priors: [Float]
+        public let invCov: SwiftMachinaArray
+    }
+
+    public func fittedState() throws -> FittedState {
+        guard let invCov else {
+            throw SwiftMachinaError.notFitted("LDA must be fitted before saving")
+        }
+
+        return FittedState(
+            schemaVersion: 1,
+            modelType: "LDA",
+            classes: classes,
+            means: means.map(SwiftMachinaArray.init),
+            priors: priors,
+            invCov: SwiftMachinaArray(invCov)
+        )
+    }
+
+    public init(fittedState: FittedState) throws {
+        try requireFittedState(
+            schemaVersion: fittedState.schemaVersion,
+            modelType: fittedState.modelType,
+            expectedModelType: "LDA"
+        )
+        try require(!fittedState.classes.isEmpty, .notFitted("LDA fitted state must contain classes"))
+        try require(
+            fittedState.means.count == fittedState.classes.count &&
+            fittedState.priors.count == fittedState.classes.count,
+            .invalidShape("LDA fitted state arrays must match class count")
+        )
+
+        self.classes = fittedState.classes
+        self.means = try fittedState.means.map { try $0.mlxArray() }
+        self.priors = fittedState.priors
+        self.invCov = try fittedState.invCov.mlxArray()
+    }
+}

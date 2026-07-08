@@ -312,3 +312,130 @@ private struct RegressionTree {
         return sum / Float(indices.count)
     }
 }
+
+extension GradientBoosting: FittedStatePersistable {
+    public final class NodeState: Codable {
+        public let value: Float
+        public let feature: Int?
+        public let threshold: Float?
+        public let left: NodeState?
+        public let right: NodeState?
+
+        public init(
+            value: Float,
+            feature: Int? = nil,
+            threshold: Float? = nil,
+            left: NodeState? = nil,
+            right: NodeState? = nil
+        ) {
+            self.value = value
+            self.feature = feature
+            self.threshold = threshold
+            self.left = left
+            self.right = right
+        }
+    }
+
+    public struct RegressionTreeState: Codable {
+        public let maxDepth: Int
+        public let minSamplesLeaf: Int
+        public let root: NodeState
+    }
+
+    public struct FittedState: Codable {
+        public let schemaVersion: Int
+        public let modelType: String
+        public let nEstimators: Int
+        public let learningRate: Float
+        public let maxDepth: Int
+        public let classValues: [Float]
+        public let initialLogOdds: Float
+        public let nFeatures: Int
+        public let trees: [RegressionTreeState]
+    }
+
+    public func fittedState() throws -> FittedState {
+        try require(!trees.isEmpty, .notFitted("GradientBoosting must be fitted before saving"))
+        return FittedState(
+            schemaVersion: 1,
+            modelType: "GradientBoosting",
+            nEstimators: nEstimators,
+            learningRate: learningRate,
+            maxDepth: maxDepth,
+            classValues: classValues,
+            initialLogOdds: initialLogOdds,
+            nFeatures: nFeatures,
+            trees: trees.map(Self.encode)
+        )
+    }
+
+    public init(fittedState: FittedState) throws {
+        try requireFittedState(
+            schemaVersion: fittedState.schemaVersion,
+            modelType: fittedState.modelType,
+            expectedModelType: "GradientBoosting"
+        )
+        try self.init(
+            nEstimators: fittedState.nEstimators,
+            learningRate: fittedState.learningRate,
+            maxDepth: fittedState.maxDepth
+        )
+        try require(fittedState.classValues.count == 2, .unsupported("GradientBoosting supports binary classification"))
+        try require(fittedState.nFeatures > 0, .invalidShape("nFeatures must be greater than zero"))
+        try require(!fittedState.trees.isEmpty, .notFitted("GradientBoosting fitted state must contain trees"))
+
+        self.classValues = fittedState.classValues
+        self.initialLogOdds = fittedState.initialLogOdds
+        self.nFeatures = fittedState.nFeatures
+        self.trees = try fittedState.trees.map(Self.decode)
+    }
+
+    private static func encode(_ tree: RegressionTree) -> RegressionTreeState {
+        RegressionTreeState(
+            maxDepth: tree.maxDepth,
+            minSamplesLeaf: tree.minSamplesLeaf,
+            root: encode(tree.root)
+        )
+    }
+
+    private static func encode(_ node: RegressionTree.Node) -> NodeState {
+        NodeState(
+            value: node.value,
+            feature: node.feature,
+            threshold: node.threshold,
+            left: node.left.map(encode),
+            right: node.right.map(encode)
+        )
+    }
+
+    private static func decode(_ state: RegressionTreeState) throws -> RegressionTree {
+        try require(state.maxDepth >= 0, .invalidParameter("maxDepth must be non-negative"))
+        try require(state.minSamplesLeaf >= 1, .invalidParameter("minSamplesLeaf must be at least 1"))
+        return RegressionTree(
+            root: try decode(state.root),
+            maxDepth: state.maxDepth,
+            minSamplesLeaf: state.minSamplesLeaf
+        )
+    }
+
+    private static func decode(_ state: NodeState) throws -> RegressionTree.Node {
+        if let feature = state.feature,
+           let threshold = state.threshold,
+           let left = state.left,
+           let right = state.right {
+            return RegressionTree.Node(
+                value: state.value,
+                feature: feature,
+                threshold: threshold,
+                left: try decode(left),
+                right: try decode(right)
+            )
+        }
+
+        try require(
+            state.feature == nil && state.threshold == nil && state.left == nil && state.right == nil,
+            .invalidShape("GradientBoosting node must be either a leaf or a complete split")
+        )
+        return RegressionTree.Node(value: state.value)
+    }
+}

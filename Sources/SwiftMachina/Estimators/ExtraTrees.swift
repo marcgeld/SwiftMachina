@@ -80,3 +80,44 @@ public struct ExtraTrees: Classifier {
         return value
     }
 }
+
+extension ExtraTrees: FittedStatePersistable {
+    public struct FittedState: Codable {
+        public let schemaVersion: Int
+        public let modelType: String
+        public let nTrees: Int
+        public let maxDepth: Int
+        public let maxFeatures: Int?
+        public let randomState: UInt64?
+        public let trees: [DecisionTree.FittedState]
+    }
+
+    public func fittedState() throws -> FittedState {
+        try require(!trees.isEmpty, .notFitted("ExtraTrees must be fitted before saving"))
+        return FittedState(
+            schemaVersion: 1,
+            modelType: "ExtraTrees",
+            nTrees: nTrees,
+            maxDepth: maxDepth,
+            maxFeatures: maxFeatures,
+            randomState: randomState,
+            trees: try trees.map { try $0.fittedState() }
+        )
+    }
+
+    public init(fittedState: FittedState) throws {
+        try requireFittedState(
+            schemaVersion: fittedState.schemaVersion,
+            modelType: fittedState.modelType,
+            expectedModelType: "ExtraTrees"
+        )
+        try self.init(
+            nTrees: fittedState.nTrees,
+            maxDepth: fittedState.maxDepth,
+            maxFeatures: fittedState.maxFeatures,
+            randomState: fittedState.randomState
+        )
+        try require(!fittedState.trees.isEmpty, .notFitted("ExtraTrees fitted state must contain trees"))
+        self.trees = try fittedState.trees.map { try DecisionTree(fittedState: $0) }
+    }
+}

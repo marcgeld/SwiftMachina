@@ -589,3 +589,145 @@ private struct BoostedTree {
         return current.weight
     }
 }
+
+extension XGBoostClassifier: FittedStatePersistable {
+    public final class NodeState: Codable {
+        public let weight: Float
+        public let feature: Int?
+        public let threshold: Float?
+        public let left: NodeState?
+        public let right: NodeState?
+
+        public init(
+            weight: Float,
+            feature: Int? = nil,
+            threshold: Float? = nil,
+            left: NodeState? = nil,
+            right: NodeState? = nil
+        ) {
+            self.weight = weight
+            self.feature = feature
+            self.threshold = threshold
+            self.left = left
+            self.right = right
+        }
+    }
+
+    public struct BoostedTreeState: Codable {
+        public let root: NodeState
+    }
+
+    public struct FittedState: Codable {
+        public let schemaVersion: Int
+        public let modelType: String
+        public let nEstimators: Int
+        public let learningRate: Float
+        public let maxDepth: Int
+        public let minChildWeight: Float
+        public let lambda: Float
+        public let alpha: Float
+        public let gamma: Float
+        public let subsample: Float
+        public let colsampleByTree: Float
+        public let maxBins: Int
+        public let randomState: UInt64?
+        public let classValues: [Float]
+        public let baseScore: Float
+        public let nFeatures: Int
+        public let bestIteration: Int?
+        public let trees: [BoostedTreeState]
+    }
+
+    public func fittedState() throws -> FittedState {
+        try require(!trees.isEmpty, .notFitted("XGBoostClassifier must be fitted before saving"))
+        return FittedState(
+            schemaVersion: 1,
+            modelType: "XGBoostClassifier",
+            nEstimators: nEstimators,
+            learningRate: learningRate,
+            maxDepth: maxDepth,
+            minChildWeight: minChildWeight,
+            lambda: lambda,
+            alpha: alpha,
+            gamma: gamma,
+            subsample: subsample,
+            colsampleByTree: colsampleByTree,
+            maxBins: maxBins,
+            randomState: randomState,
+            classValues: classValues,
+            baseScore: baseScore,
+            nFeatures: nFeatures,
+            bestIteration: bestIteration,
+            trees: trees.map(Self.encode)
+        )
+    }
+
+    public init(fittedState: FittedState) throws {
+        try requireFittedState(
+            schemaVersion: fittedState.schemaVersion,
+            modelType: fittedState.modelType,
+            expectedModelType: "XGBoostClassifier"
+        )
+        try self.init(
+            nEstimators: fittedState.nEstimators,
+            learningRate: fittedState.learningRate,
+            maxDepth: fittedState.maxDepth,
+            minChildWeight: fittedState.minChildWeight,
+            lambda: fittedState.lambda,
+            alpha: fittedState.alpha,
+            gamma: fittedState.gamma,
+            subsample: fittedState.subsample,
+            colsampleByTree: fittedState.colsampleByTree,
+            maxBins: fittedState.maxBins,
+            randomState: fittedState.randomState
+        )
+        try require(fittedState.classValues.count == 2, .unsupported("XGBoostClassifier supports binary classification"))
+        try require(fittedState.nFeatures > 0, .invalidShape("nFeatures must be greater than zero"))
+        try require(!fittedState.trees.isEmpty, .notFitted("XGBoostClassifier fitted state must contain trees"))
+
+        self.classValues = fittedState.classValues
+        self.baseScore = fittedState.baseScore
+        self.nFeatures = fittedState.nFeatures
+        self.bestIteration = fittedState.bestIteration
+        self.trees = try fittedState.trees.map(Self.decode)
+    }
+
+    private static func encode(_ tree: BoostedTree) -> BoostedTreeState {
+        BoostedTreeState(root: encode(tree.root))
+    }
+
+    private static func encode(_ node: BoostedTree.Node) -> NodeState {
+        NodeState(
+            weight: node.weight,
+            feature: node.feature,
+            threshold: node.threshold,
+            left: node.left.map(encode),
+            right: node.right.map(encode)
+        )
+    }
+
+    private static func decode(_ state: BoostedTreeState) throws -> BoostedTree {
+        BoostedTree(root: try decode(state.root))
+    }
+
+    private static func decode(_ state: NodeState) throws -> BoostedTree.Node {
+        if let feature = state.feature,
+           let threshold = state.threshold,
+           let left = state.left,
+           let right = state.right {
+            return BoostedTree.Node(
+                weight: state.weight,
+                feature: feature,
+                threshold: threshold,
+                left: try decode(left),
+                right: try decode(right)
+            )
+        }
+
+        try require(
+            state.feature == nil && state.threshold == nil && state.left == nil && state.right == nil,
+            .invalidShape("XGBoostClassifier node must be either a leaf or a complete split")
+        )
+        return BoostedTree.Node(weight: state.weight)
+    }
+}
