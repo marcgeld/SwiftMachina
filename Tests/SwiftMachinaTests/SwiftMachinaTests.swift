@@ -531,6 +531,100 @@ struct GradientBoostingTests {
     }
 }
 
+@Suite("XGBoost", CPUDeviceTrait())
+struct XGBoostTests {
+
+    @Test func learnsSimpleData() throws {
+        let (X, y) = makeLinearData(n: 100)
+        let (xTrain, yTrain, xTest, yTest) = splitData(X, y)
+
+        var model = try XGBoostClassifier(nEstimators: 20, learningRate: 0.3, maxDepth: 3)
+        try model.fit(X: xTrain, y: yTrain)
+        let preds = try model.predict(X: xTest)
+
+        let acc = try Accuracy().score(yTest, preds)
+        #expect(acc >= 0.75, "Expected >=75% accuracy, got \(acc)")
+    }
+
+    @Test func preservesArbitraryBinaryLabels() throws {
+        let (X, y) = makeTwoClusterData(leftLabel: 3, rightLabel: 2)
+
+        var model = try XGBoostClassifier(nEstimators: 20, learningRate: 0.3, maxDepth: 3)
+        try model.fit(X: X, y: y)
+        let preds = try model.predict(X: X)
+
+        #expect(try Accuracy().score(y, preds) >= 0.95)
+        #expect(Set(floatValues(preds)) == Set<Float>([2.0, 3.0]))
+    }
+
+    @Test func predictProbaReturnsValidProbabilities() throws {
+        let (X, y) = makeLinearData(n: 60)
+        let (xTrain, yTrain, xTest, _) = splitData(X, y)
+
+        var model = try XGBoostClassifier(nEstimators: 10, learningRate: 0.3, maxDepth: 3)
+        try model.fit(X: xTrain, y: yTrain)
+        let probs = try model.predictProba(X: xTest)
+
+        #expect(probs.shape == [xTest.shape[0], 1])
+        for p in floatValues(probs) {
+            #expect(p >= 0 && p <= 1, "Probability out of range: \(p)")
+        }
+    }
+
+    @Test func highGammaPreventsSplits() throws {
+        let (X, y) = makeLinearData(n: 60)
+
+        var model = try XGBoostClassifier(nEstimators: 5, learningRate: 0.3, maxDepth: 3, gamma: 1e9)
+        try model.fit(X: X, y: y)
+        let preds = try model.predict(X: X)
+
+        // With an enormous split penalty every tree is a single leaf,
+        // so all predictions collapse to one class.
+        #expect(Set(floatValues(preds)).count == 1)
+    }
+
+    @Test func regularizationShrinksConfidence() throws {
+        let (X, y) = makeLinearData(n: 60)
+
+        var weak = try XGBoostClassifier(nEstimators: 10, learningRate: 0.3, maxDepth: 3, lambda: 100.0)
+        var strong = try XGBoostClassifier(nEstimators: 10, learningRate: 0.3, maxDepth: 3, lambda: 0.0)
+        try weak.fit(X: X, y: y)
+        try strong.fit(X: X, y: y)
+
+        // Heavier L2 keeps probabilities closer to the base rate (0.5).
+        let weakSpread = floatValues(try weak.predictProba(X: X)).map { abs($0 - 0.5) }.max()!
+        let strongSpread = floatValues(try strong.predictProba(X: X)).map { abs($0 - 0.5) }.max()!
+        #expect(weakSpread < strongSpread)
+    }
+
+    @Test func earlyStoppingTruncatesRounds() throws {
+        let (X, y) = makeLinearData(n: 100)
+        let (xTrain, yTrain, xTest, yTest) = splitData(X, y)
+
+        var model = try XGBoostClassifier(nEstimators: 200, learningRate: 0.3, maxDepth: 3)
+        try model.fit(X: xTrain, y: yTrain, evalX: xTest, evalY: yTest, earlyStoppingRounds: 5)
+
+        #expect(model.bestIteration != nil)
+        #expect(model.boostedRounds < 200, "Early stopping should truncate, kept \(model.boostedRounds)")
+        #expect(model.boostedRounds == model.bestIteration! + 1)
+    }
+
+    @Test func predictBeforeFitThrows() throws {
+        let (X, _) = makeLinearData(n: 10)
+        let model = try XGBoostClassifier()
+        var didThrow = false
+
+        do {
+            _ = try model.predict(X: X)
+        } catch {
+            didThrow = true
+            #expect((error as? SwiftMachinaError) == .notFitted("XGBoostClassifier must be fitted before prediction"))
+        }
+
+        #expect(didThrow)
+    }
+}
+
 // MARK: - Determinism Tests
 
 @Suite("Determinism", CPUDeviceTrait())
@@ -570,5 +664,22 @@ struct DeterminismTests {
         try second.fit(X: xTrain, y: yTrain)
 
         #expect(floatValues(try first.predict(X: xTest)) == floatValues(try second.predict(X: xTest)))
+    }
+
+    @Test func xgboostSameSeedProducesSamePredictions() throws {
+        let (X, y) = makeLinearData(n: 60)
+        let (xTrain, yTrain, xTest, _) = splitData(X, y)
+
+        var first = try XGBoostClassifier(
+            nEstimators: 10, maxDepth: 3, subsample: 0.7, colsampleByTree: 0.5, randomState: 123
+        )
+        var second = try XGBoostClassifier(
+            nEstimators: 10, maxDepth: 3, subsample: 0.7, colsampleByTree: 0.5, randomState: 123
+        )
+
+        try first.fit(X: xTrain, y: yTrain)
+        try second.fit(X: xTrain, y: yTrain)
+
+        #expect(floatValues(try first.predictProba(X: xTest)) == floatValues(try second.predictProba(X: xTest)))
     }
 }

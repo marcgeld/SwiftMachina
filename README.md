@@ -19,7 +19,7 @@ The public API mirrors scikit-learn conventions, adapted to Swift value semantic
 
 ## What's Implemented
 
-- **Estimators**: `LogisticRegression` (MLXNN + SGD), `SVM` (linear, hinge loss), `KNN` (vectorized distance matrix + majority vote), `DecisionTree` (CART, gini), `RandomForest`, `ExtraTrees`, `GradientBoosting` (binary log-loss boosting with regression trees), `GaussianNaiveBayes`, `LDA`, `QDA`
+- **Estimators**: `LogisticRegression` (MLXNN + SGD), `SVM` (linear, hinge loss), `KNN` (vectorized distance matrix + majority vote), `DecisionTree` (CART, gini), `RandomForest`, `ExtraTrees`, `GradientBoosting` (binary log-loss boosting with regression trees), `XGBoostClassifier` (regularized second-order boosting: gradient + hessian leaf weights, L1/L2/gamma, shrinkage, row/column subsampling, histogram-based splits, early stopping), `GaussianNaiveBayes`, `LDA`, `QDA`
 - **Preprocessing**: `StandardScaler`, `trainTestSplit` (stratified, seeded — mirrors sklearn's `train_test_split(random_state:stratify:)`)
 - **Pipeline**: chains transformers and a final model behind one `fit`/`predict`
 - **Metrics**: `Accuracy`, `ConfusionMatrix` (accuracy, precision, recall, F1, specificity, balanced accuracy, MCC)
@@ -50,7 +50,7 @@ let cm = try ConfusionMatrix().compute(split.ytest, predictions)
 print("accuracy: \(cm.accuracy), F1: \(cm.f1), MCC: \(cm.mcc)")
 ```
 
-A complete, runnable version of this workflow (CSV loading via TabularData, all ten estimators compared, timings) lives in [Sources/SwiftMachinaExample](Sources/SwiftMachinaExample).
+A complete, runnable version of this workflow (CSV loading via TabularData, all eleven estimators compared, timings) lives in [Sources/SwiftMachinaExample](Sources/SwiftMachinaExample).
 
 ## Package Structure
 
@@ -60,7 +60,7 @@ Sources/
 │   ├── Core          (protocols, shared types, NumericaBridge)
 │   ├── Estimators    (LogisticRegression, SVM, KNN, DecisionTree,
 │   │                  RandomForest, ExtraTrees, GradientBoosting,
-│   │                  GaussianNaiveBayes, LDA, QDA)
+│   │                  XGBoost, GaussianNaiveBayes, LDA, QDA)
 │   ├── Preprocessing (StandardScaler, TrainTestSplit)
 │   ├── Pipeline
 │   ├── Metrics       (Accuracy, ConfusionMatrix)
@@ -144,8 +144,7 @@ The consuming app must be built with Xcode / `xcodebuild` for the MLX Metal shad
 
 Roughly in priority order:
 
-- **XGBoost-style gradient boosting**: regularized second-order boosting (gradient + hessian leaf weights, L1/L2 penalties, shrinkage, column/row subsampling), histogram-based split finding, and early stopping — as a separate estimator alongside the current `GradientBoosting`.
-- **Regression support**: put the `Regressor` protocol to work — `LinearRegression`, `DecisionTreeRegressor`, and regression variants of the ensembles, plus regression metrics (MSE, MAE, R²).
+- **Regression support**: put the `Regressor` protocol to work — `LinearRegression`, `DecisionTreeRegressor`, and regression variants of the ensembles (including an `XGBoostRegressor`), plus regression metrics (MSE, MAE, R²).
 - **Multiclass beyond the discriminant models**: `KNN`, the confusion matrix, and the losses are binary today; extend to multiclass (one-vs-rest where natural) and add a multiclass confusion matrix.
 - **Model selection**: k-fold cross-validation and grid search — the `Hyperparameter` container in Core already reserves the API surface.
 - **Probability everywhere**: `predictProba` on all classifiers (only `LogisticRegression` has it), enabling ROC-AUC and log-loss metrics.

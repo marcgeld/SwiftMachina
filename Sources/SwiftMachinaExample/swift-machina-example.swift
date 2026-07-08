@@ -129,6 +129,10 @@ struct swiftmlx {
 
                 ("Gradient Boosting",
                  try GradientBoosting(nEstimators: 20, learningRate: 0.1),
+                 ytrain, ytest),
+
+                ("XGBoost",
+                 try XGBoostClassifier(nEstimators: 50, learningRate: 0.3, maxDepth: 4, randomState: 42),
                  ytrain, ytest)
             ]
 
