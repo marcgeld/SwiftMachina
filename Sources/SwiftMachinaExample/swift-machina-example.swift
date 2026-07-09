@@ -11,7 +11,7 @@ import TabularData
 // Verify build without Metal: export MLX_METAL_ENABLED=0
 
 @main
-struct swiftmlx {
+struct SwiftMachinaExample {
 
     static func loadData() throws -> (MLXArray, MLXArray) {
         let url = Bundle.module.url(forResource: "breast_cancer", withExtension: "csv")!

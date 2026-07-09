@@ -1,6 +1,6 @@
 //
 //  Accuracy.swift
-//  swiftmlx
+//  SwiftMachina
 //
 //  Created by Marcus Gelderman on 2026-04-28.
 //
