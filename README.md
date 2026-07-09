@@ -177,6 +177,35 @@ Roughly in priority order:
 - **Probability everywhere**: `predictProba` on all classifiers (only `LogisticRegression` has it), enabling ROC-AUC and log-loss metrics.
 - **CoreML export/conversion**: map persisted fitted-state JSON into `.mlmodel` artifacts where the target estimator has a practical CoreML representation.
 
+## Review Backlog (Code Review 2026-07-09)
+
+Verified findings from the persistence/validation review, in priority order. The fitted-state loader is a trust boundary — the JSON is documented as consumable from Python and other tools, so load paths must throw `SwiftMachinaError` instead of trapping.
+
+**Correctness — hostile or corrupt fitted-state JSON can crash the process:**
+
+- Decoded tree nodes never bounds-check `feature` against `nFeatures` (`DecisionTree`, `GradientBoosting`, `XGBoostClassifier` node decoders). Out-of-range indices give an index trap or silently wrong predictions at `predict`.
+- `SwiftMachinaArray`: Codable synthesis bypasses the validating initializer; negative dimensions whose product matches the count reach MLX `reshaped()` and abort; a huge dimension traps with arithmetic overflow in `shape.reduce(1, *)`. Needs a validating `init(from:)` with non-negative, overflow-safe dimension checks.
+- `DecisionTree.init(fittedState:)` builds `classIndex` with `Dictionary(uniqueKeysWithValues:)`, which fatal-errors on duplicate `classValues` instead of throwing. `RandomForest`/`ExtraTrees` loads route through it.
+- Loaded array shapes are not validated against declared dimensions: `LogisticRegression`/`SVM` never check `weight == [1, inputSize]` (a `[inputSize]`-shaped weight silently changes predict's output shape to `[N]`); `GaussianNaiveBayes`/`LDA`/`QDA` check counts but not each mean/variance/covariance shape against `nFeatures`.
+- `KNN.init(fittedState:)` accepts an empty or inconsistent `classes` list — empty crashes on a force-unwrap in `majorityLabel`; a list missing a `yTrain` label silently drops that class's votes.
+- `saveFittedState` uses `JSONEncoder` defaults, so NaN/infinite floats (diverged weights, NaN features in KNN's persisted matrix) throw Foundation's opaque `EncodingError` after a successful `fit`. Add a pre-save finiteness check in the `SwiftMachinaError` domain.
+
+**Quality and efficiency:**
+
+- Three structurally identical recursive `NodeState` codecs (`DecisionTree`, `GradientBoosting`, `XGBoostClassifier`) differ only in the leaf field name — replace with one shared generic tree-node codec in `Core/Persistence.swift`.
+- KNN persists its full training matrix as individually boxed JSON numbers, and `saveFittedState` defaults to `prettyPrinted` + `sortedKeys` — large payloads inflate 3–6×. Prefer a base64 `Data` blob for large float buffers and compact JSON by default.
+- `schemaVersion`/`modelType` are hand-copied literals across all 11 `FittedState` structs and `requireFittedState` hardcodes version 1 — introduce a shared envelope/constants so a version bump is one edit.
+- The persistence error paths (schema-version mismatch, `modelType` mismatch, save-before-fit, malformed arrays) have no test coverage.
+
+**Documentation:**
+
+- The Rules section forbids file-format code in `Sources/SwiftMachina` while the JSON persistence layer legitimately lives there — add a one-line carve-out distinguishing dataset loading (still banned) from fitted-state serialization (sanctioned).
+- The Future Plans bullet "predictProba on all classifiers (only `LogisticRegression` has it)" is stale — `XGBoostClassifier` also has `predictProba`.
+
+**Examples:**
+
+- Restructure `SwiftMachinaMiniExamples`: split the monolithic `MiniModel` enum and its 11-way switches so that every estimator has its own method — or its own `main` in its own file — whose name states which model it demonstrates (e.g. `KNNMiniExample`, `XGBoostMiniExample`). Adding an estimator should mean adding one file, not editing parallel switch statements.
+
 ## Contribution Guidelines
 
 - Keep `MLXArray` as the data type of every public `fit`/`predict`/`transform` signature.
