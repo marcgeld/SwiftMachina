@@ -113,7 +113,7 @@ extension KNN: FittedStatePersistable {
         }
 
         return FittedState(
-            schemaVersion: 1,
+            schemaVersion: fittedStateSchemaVersion,
             modelType: "KNN",
             k: k,
             xTrain: SwiftMachinaArray(Xtrain),
@@ -135,6 +135,13 @@ extension KNN: FittedStatePersistable {
         try require(xTrain.shape.count == 2, .invalidShape("xTrain must be a 2D array"))
         try requireLabelVector(yTrain, rows: xTrain.shape[0], name: "yTrain")
         try require(xTrain.shape[0] > 0, .invalidShape("xTrain must contain at least one sample"))
+        try require(!fittedState.classes.isEmpty, .notFitted("KNN fitted state must contain classes"))
+
+        let labels = Set(yTrain.flattened().asArray(Float.self))
+        try require(
+            labels.isSubset(of: Set(fittedState.classes)),
+            .invalidParameter("KNN classes must include every yTrain label")
+        )
 
         self.k = fittedState.k
         self.Xtrain = xTrain

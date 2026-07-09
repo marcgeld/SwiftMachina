@@ -119,7 +119,7 @@ extension QDA: FittedStatePersistable {
     public func fittedState() throws -> FittedState {
         try require(!classes.isEmpty, .notFitted("QDA must be fitted before saving"))
         return FittedState(
-            schemaVersion: 1,
+            schemaVersion: fittedStateSchemaVersion,
             modelType: "QDA",
             regParam: regParam,
             classes: classes,
@@ -144,10 +144,27 @@ extension QDA: FittedStatePersistable {
             .invalidShape("QDA fitted state arrays must match class count")
         )
 
+        let covs = try fittedState.covs.map { try $0.mlxArray() }
+        let means = try fittedState.means.map { try $0.mlxArray() }
+        let dimension = covs[0].shape.first ?? 0
+        try require(dimension > 0, .invalidShape("QDA covariances must be non-empty"))
+        for cov in covs {
+            try require(
+                cov.shape == [dimension, dimension],
+                .invalidShape("QDA covariances must be square 2D matrices of one shared dimension")
+            )
+        }
+        for mean in means {
+            try require(
+                mean.shape == [dimension],
+                .invalidShape("QDA means must match the covariance dimension")
+            )
+        }
+
         self.regParam = fittedState.regParam
         self.classes = fittedState.classes
-        self.means = try fittedState.means.map { try $0.mlxArray() }
-        self.covs = try fittedState.covs.map { try $0.mlxArray() }
+        self.means = means
+        self.covs = covs
         self.priors = fittedState.priors
     }
 }

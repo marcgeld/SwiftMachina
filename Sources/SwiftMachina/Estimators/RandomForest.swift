@@ -94,7 +94,7 @@ extension RandomForest: FittedStatePersistable {
     public func fittedState() throws -> FittedState {
         try require(!trees.isEmpty, .notFitted("RandomForest must be fitted before saving"))
         return FittedState(
-            schemaVersion: 1,
+            schemaVersion: fittedStateSchemaVersion,
             modelType: "RandomForest",
             nTrees: nTrees,
             maxDepth: maxDepth,

@@ -98,7 +98,7 @@ extension GaussianNaiveBayes: FittedStatePersistable {
     public func fittedState() throws -> FittedState {
         try require(!classes.isEmpty, .notFitted("GaussianNaiveBayes must be fitted before saving"))
         return FittedState(
-            schemaVersion: 1,
+            schemaVersion: fittedStateSchemaVersion,
             modelType: "GaussianNaiveBayes",
             classes: classes,
             means: means.map(SwiftMachinaArray.init),
@@ -124,9 +124,18 @@ extension GaussianNaiveBayes: FittedStatePersistable {
             .invalidShape("GaussianNaiveBayes fitted state arrays must match class count")
         )
 
+        let means = try fittedState.means.map { try $0.mlxArray() }
+        let variances = try fittedState.variances.map { try $0.mlxArray() }
+        for array in means + variances {
+            try require(
+                array.shape == [fittedState.nFeatures],
+                .invalidShape("GaussianNaiveBayes means and variances must have shape [nFeatures]")
+            )
+        }
+
         self.classes = fittedState.classes
-        self.means = try fittedState.means.map { try $0.mlxArray() }
-        self.variances = try fittedState.variances.map { try $0.mlxArray() }
+        self.means = means
+        self.variances = variances
         self.priors = fittedState.priors
         self.nFeatures = fittedState.nFeatures
     }

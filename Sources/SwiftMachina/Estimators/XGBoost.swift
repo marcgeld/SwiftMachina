@@ -550,7 +550,7 @@ private struct TreeBuilder {
 
 // MARK: - Boosted Tree
 
-private struct BoostedTree {
+struct BoostedTree {
     final class Node {
         let weight: Float
         let feature: Int?
@@ -590,31 +590,25 @@ private struct BoostedTree {
     }
 }
 
-extension XGBoostClassifier: FittedStatePersistable {
-    public final class NodeState: Codable {
-        public let weight: Float
-        public let feature: Int?
-        public let threshold: Float?
-        public let left: NodeState?
-        public let right: NodeState?
+extension BoostedTree.Node: TreeNodeRepresentable {
+    var nodeValue: Float { weight }
+    var nodeFeature: Int? { feature }
+    var nodeThreshold: Float? { threshold }
+    var nodeLeft: BoostedTree.Node? { left }
+    var nodeRight: BoostedTree.Node? { right }
 
-        public init(
-            weight: Float,
-            feature: Int? = nil,
-            threshold: Float? = nil,
-            left: NodeState? = nil,
-            right: NodeState? = nil
-        ) {
-            self.weight = weight
-            self.feature = feature
-            self.threshold = threshold
-            self.left = left
-            self.right = right
-        }
+    convenience init(leafValue: Float) {
+        self.init(weight: leafValue)
     }
 
+    convenience init(value: Float, feature: Int, threshold: Float, left: BoostedTree.Node, right: BoostedTree.Node) {
+        self.init(weight: value, feature: feature, threshold: threshold, left: left, right: right)
+    }
+}
+
+extension XGBoostClassifier: FittedStatePersistable {
     public struct BoostedTreeState: Codable {
-        public let root: NodeState
+        public let root: TreeNodeState
     }
 
     public struct FittedState: Codable {
@@ -641,7 +635,7 @@ extension XGBoostClassifier: FittedStatePersistable {
     public func fittedState() throws -> FittedState {
         try require(!trees.isEmpty, .notFitted("XGBoostClassifier must be fitted before saving"))
         return FittedState(
-            schemaVersion: 1,
+            schemaVersion: fittedStateSchemaVersion,
             modelType: "XGBoostClassifier",
             nEstimators: nEstimators,
             learningRate: learningRate,
@@ -689,45 +683,13 @@ extension XGBoostClassifier: FittedStatePersistable {
         self.baseScore = fittedState.baseScore
         self.nFeatures = fittedState.nFeatures
         self.bestIteration = fittedState.bestIteration
-        self.trees = try fittedState.trees.map(Self.decode)
+        self.trees = try fittedState.trees.map { tree in
+            try tree.root.validate(nFeatures: fittedState.nFeatures, model: "XGBoostClassifier")
+            return BoostedTree(root: tree.root.decodedNode())
+        }
     }
 
     private static func encode(_ tree: BoostedTree) -> BoostedTreeState {
-        BoostedTreeState(root: encode(tree.root))
-    }
-
-    private static func encode(_ node: BoostedTree.Node) -> NodeState {
-        NodeState(
-            weight: node.weight,
-            feature: node.feature,
-            threshold: node.threshold,
-            left: node.left.map(encode),
-            right: node.right.map(encode)
-        )
-    }
-
-    private static func decode(_ state: BoostedTreeState) throws -> BoostedTree {
-        BoostedTree(root: try decode(state.root))
-    }
-
-    private static func decode(_ state: NodeState) throws -> BoostedTree.Node {
-        if let feature = state.feature,
-           let threshold = state.threshold,
-           let left = state.left,
-           let right = state.right {
-            return BoostedTree.Node(
-                weight: state.weight,
-                feature: feature,
-                threshold: threshold,
-                left: try decode(left),
-                right: try decode(right)
-            )
-        }
-
-        try require(
-            state.feature == nil && state.threshold == nil && state.left == nil && state.right == nil,
-            .invalidShape("XGBoostClassifier node must be either a leaf or a complete split")
-        )
-        return BoostedTree.Node(weight: state.weight)
+        BoostedTreeState(root: TreeNodeState(encoding: tree.root))
     }
 }

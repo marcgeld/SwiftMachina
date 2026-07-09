@@ -141,7 +141,7 @@ extension SVM: FittedStatePersistable {
     public func fittedState() throws -> FittedState {
         try require(isFitted, .notFitted("SVM must be fitted before saving"))
         return FittedState(
-            schemaVersion: 1,
+            schemaVersion: fittedStateSchemaVersion,
             modelType: "SVM",
             inputSize: inputSize,
             epochs: epochs,
@@ -163,14 +163,21 @@ extension SVM: FittedStatePersistable {
         try require(fittedState.learningRate > 0, .invalidParameter("learningRate must be greater than zero"))
         try require(fittedState.lambda >= 0, .invalidParameter("lambda must be non-negative"))
 
+        let weight = try fittedState.weight.mlxArray()
+        try require(
+            weight.shape == [1, fittedState.inputSize],
+            .invalidShape("SVM weight must have shape [1, inputSize]")
+        )
+        let bias = try fittedState.bias?.mlxArray()
+        if let bias {
+            try require(bias.shape == [1], .invalidShape("SVM bias must have shape [1]"))
+        }
+
         self.inputSize = fittedState.inputSize
         self.epochs = fittedState.epochs
         self.learningRate = fittedState.learningRate
         self.lambda = fittedState.lambda
-        self.linear = Linear(
-            weight: try fittedState.weight.mlxArray(),
-            bias: try fittedState.bias?.mlxArray()
-        )
+        self.linear = Linear(weight: weight, bias: bias)
         self.isFitted = true
     }
 }

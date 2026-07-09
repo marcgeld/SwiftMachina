@@ -73,7 +73,9 @@ let restored = try RandomForest.loadFittedState(from: URL(fileURLWithPath: "fore
 let predictions = try restored.predict(X: xTest)
 ```
 
-The JSON artifacts include `schemaVersion`, `modelType`, hyperparameters, and the complete learned state: fitted weights, class statistics, memorized KNN samples, or explicit tree nodes depending on the estimator. Array payloads use `SwiftMachinaArray`, a simple row-major `{ shape, values }` representation intended to be easy to decode from Python, Swift apps, and CoreML-hosting apps.
+The JSON artifacts include `schemaVersion`, `modelType`, hyperparameters, and the complete learned state: fitted weights, class statistics, memorized KNN samples, or explicit tree nodes depending on the estimator. Array payloads use `SwiftMachinaArray`, a simple row-major `{ shape, values }` representation intended to be easy to decode from Python, Swift apps, and CoreML-hosting apps. All tree-based estimators share one `TreeNodeState` node schema (`value`, `feature`, `threshold`, `left`, `right`).
+
+Artifacts are compact JSON with sorted keys by default; pass `prettyPrinted: true` for a human-readable file. The fitted-state loader treats files as untrusted input: array shapes, tree feature indices, and class lists are validated and rejected with a thrown `SwiftMachinaError` — never a crash — and non-finite values are rejected at save time.
 
 This is not yet a CoreML `.mlmodel` exporter. It is the stable fitted-state layer that a separate Python benchmark/conversion project or future CoreML converter can consume.
 
@@ -174,37 +176,17 @@ Roughly in priority order:
 - **Regression support**: put the `Regressor` protocol to work — `LinearRegression`, `DecisionTreeRegressor`, and regression variants of the ensembles (including an `XGBoostRegressor`), plus regression metrics (MSE, MAE, R²).
 - **Multiclass beyond the discriminant models**: `KNN`, the confusion matrix, and the losses are binary today; extend to multiclass (one-vs-rest where natural) and add a multiclass confusion matrix.
 - **Model selection**: k-fold cross-validation and grid search — the `Hyperparameter` container in Core already reserves the API surface.
-- **Probability everywhere**: `predictProba` on all classifiers (only `LogisticRegression` has it), enabling ROC-AUC and log-loss metrics.
+- **Probability everywhere**: `predictProba` on all classifiers (currently `LogisticRegression` and `XGBoostClassifier` have it), enabling ROC-AUC and log-loss metrics.
 - **CoreML export/conversion**: map persisted fitted-state JSON into `.mlmodel` artifacts where the target estimator has a practical CoreML representation.
 
 ## Review Backlog (Code Review 2026-07-09)
 
-Verified findings from the persistence/validation review, in priority order. The fitted-state loader is a trust boundary — the JSON is documented as consumable from Python and other tools, so load paths must throw `SwiftMachinaError` instead of trapping.
+The 2026-07-09 persistence/validation review produced ten verified findings; the hardening pass the same day resolved the correctness items (fitted-state loading now validates untrusted JSON — tree feature bounds, array shapes and dimensions, class lists, duplicate class values — and save rejects non-finite values, all in the `SwiftMachinaError` domain), replaced the three per-estimator tree codecs with the shared `TreeNodeState`, introduced the `fittedStateSchemaVersion` constant, switched artifacts to compact JSON by default, added error-path test coverage, fixed the documentation conflicts, and split `SwiftMachinaMiniExamples` into one `<Model>MiniExample` file per estimator.
 
-**Correctness — hostile or corrupt fitted-state JSON can crash the process:**
+Remaining:
 
-- Decoded tree nodes never bounds-check `feature` against `nFeatures` (`DecisionTree`, `GradientBoosting`, `XGBoostClassifier` node decoders). Out-of-range indices give an index trap or silently wrong predictions at `predict`.
-- `SwiftMachinaArray`: Codable synthesis bypasses the validating initializer; negative dimensions whose product matches the count reach MLX `reshaped()` and abort; a huge dimension traps with arithmetic overflow in `shape.reduce(1, *)`. Needs a validating `init(from:)` with non-negative, overflow-safe dimension checks.
-- `DecisionTree.init(fittedState:)` builds `classIndex` with `Dictionary(uniqueKeysWithValues:)`, which fatal-errors on duplicate `classValues` instead of throwing. `RandomForest`/`ExtraTrees` loads route through it.
-- Loaded array shapes are not validated against declared dimensions: `LogisticRegression`/`SVM` never check `weight == [1, inputSize]` (a `[inputSize]`-shaped weight silently changes predict's output shape to `[N]`); `GaussianNaiveBayes`/`LDA`/`QDA` check counts but not each mean/variance/covariance shape against `nFeatures`.
-- `KNN.init(fittedState:)` accepts an empty or inconsistent `classes` list — empty crashes on a force-unwrap in `majorityLabel`; a list missing a `yTrain` label silently drops that class's votes.
-- `saveFittedState` uses `JSONEncoder` defaults, so NaN/infinite floats (diverged weights, NaN features in KNN's persisted matrix) throw Foundation's opaque `EncodingError` after a successful `fit`. Add a pre-save finiteness check in the `SwiftMachinaError` domain.
-
-**Quality and efficiency:**
-
-- Three structurally identical recursive `NodeState` codecs (`DecisionTree`, `GradientBoosting`, `XGBoostClassifier`) differ only in the leaf field name — replace with one shared generic tree-node codec in `Core/Persistence.swift`.
-- KNN persists its full training matrix as individually boxed JSON numbers, and `saveFittedState` defaults to `prettyPrinted` + `sortedKeys` — large payloads inflate 3–6×. Prefer a base64 `Data` blob for large float buffers and compact JSON by default.
-- `schemaVersion`/`modelType` are hand-copied literals across all 11 `FittedState` structs and `requireFittedState` hardcodes version 1 — introduce a shared envelope/constants so a version bump is one edit.
-- The persistence error paths (schema-version mismatch, `modelType` mismatch, save-before-fit, malformed arrays) have no test coverage.
-
-**Documentation:**
-
-- The Rules section forbids file-format code in `Sources/SwiftMachina` while the JSON persistence layer legitimately lives there — add a one-line carve-out distinguishing dataset loading (still banned) from fitted-state serialization (sanctioned).
-- The Future Plans bullet "predictProba on all classifiers (only `LogisticRegression` has it)" is stale — `XGBoostClassifier` also has `predictProba`.
-
-**Examples:**
-
-- Restructure `SwiftMachinaMiniExamples`: split the monolithic `MiniModel` enum and its 11-way switches so that every estimator has its own method — or its own `main` in its own file — whose name states which model it demonstrates (e.g. `KNNMiniExample`, `XGBoostMiniExample`). Adding an estimator should mean adding one file, not editing parallel switch statements.
+- **KNN payload encoding**: the training matrix is still persisted as individually boxed JSON numbers. For large training sets, add a base64 `Data` blob representation of the raw little-endian Float32 buffer (`numpy.frombuffer`-compatible) alongside or instead of the `values` array.
+- **Fitted-state envelope**: `schemaVersion`/`modelType` are still fields on every `FittedState` struct (now sourced from the shared constant and checked by the shared `requireFittedState`). A generic `FittedStateEnvelope<Payload>` owning both fields once — and enabling modelType-based loader dispatch — remains future work.
 
 ## Contribution Guidelines
 
@@ -224,4 +206,4 @@ README.md is the authoritative architecture document. If implementation and READ
 - **Dataset-sized math stays on MLX.** Do not route per-sample or per-feature-column computation through SwiftNumerica, CPU loops, or Accelerate — it would leave the GPU and break the lazy-evaluation model. The only sanctioned CPU exceptions are tree building and `NumericaBridge`.
 - **SwiftNumerica is for small features × features matrices only**, accessed exclusively through `NumericaBridge`. Widen that bridge only when SwiftNumerica gains a capability this package needs (e.g. Cholesky); do not scatter direct `SwiftNumerica` imports across estimators.
 - **Cross-library parity stays outside this repo.** Comparison against scikit-learn, XGBoost, LightGBM, CatBoost, Create ML, or other libraries belongs in a separate benchmark harness that imports SwiftMachina. Do not add Python tooling or generated Python fixtures to this package.
-- **Do not add dataset/file-format assumptions to the library.** CSV/TabularData loading belongs in examples and consuming apps, never in `Sources/SwiftMachina`.
+- **Do not add dataset/file-format assumptions to the library.** CSV/TabularData loading belongs in examples and consuming apps, never in `Sources/SwiftMachina`. The one sanctioned format exception is the JSON fitted-state serialization in `Core/Persistence.swift` — that is model persistence, not dataset I/O, and it stays confined to the persistence layer.

@@ -95,7 +95,7 @@ extension ExtraTrees: FittedStatePersistable {
     public func fittedState() throws -> FittedState {
         try require(!trees.isEmpty, .notFitted("ExtraTrees must be fitted before saving"))
         return FittedState(
-            schemaVersion: 1,
+            schemaVersion: fittedStateSchemaVersion,
             modelType: "ExtraTrees",
             nTrees: nTrees,
             maxDepth: maxDepth,

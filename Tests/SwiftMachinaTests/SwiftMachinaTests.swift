@@ -888,3 +888,192 @@ struct DeterminismTests {
         #expect(floatValues(try first.predictProba(X: xTest)) == floatValues(try second.predictProba(X: xTest)))
     }
 }
+
+// MARK: - Persistence Error-Path Tests
+
+@Suite("Persistence errors", CPUDeviceTrait())
+struct PersistenceErrorTests {
+
+    private func writeFixture(_ json: String, prefix: String) throws -> URL {
+        let url = temporaryJSONURL(prefix)
+        try #require(json.data(using: .utf8)).write(to: url)
+        return url
+    }
+
+    private func expectLoadThrows<Model: FittedStatePersistable>(
+        _ type: Model.Type,
+        json: String,
+        prefix: String,
+        _ expected: SwiftMachinaError? = nil
+    ) throws {
+        let url = try writeFixture(json, prefix: prefix)
+        defer { try? FileManager.default.removeItem(at: url) }
+
+        var didThrow = false
+        do {
+            _ = try Model.loadFittedState(from: url)
+        } catch {
+            didThrow = true
+            if let expected {
+                #expect((error as? SwiftMachinaError) == expected, "unexpected error: \(error)")
+            } else {
+                #expect(error is SwiftMachinaError, "expected SwiftMachinaError, got \(error)")
+            }
+        }
+        #expect(didThrow, "\(prefix): load should have thrown")
+    }
+
+    private static let knnFixture = """
+    {"schemaVersion":%VERSION%,"modelType":"%TYPE%","k":1,\
+    "xTrain":{"shape":%XSHAPE%,"values":[1,2,3,4]},\
+    "yTrain":{"shape":[2,1],"values":[0,1]},"classes":%CLASSES%}
+    """
+
+    private func knnJSON(
+        version: Int = 1,
+        modelType: String = "KNN",
+        xShape: String = "[2,2]",
+        classes: String = "[0,1]"
+    ) -> String {
+        Self.knnFixture
+            .replacingOccurrences(of: "%VERSION%", with: String(version))
+            .replacingOccurrences(of: "%TYPE%", with: modelType)
+            .replacingOccurrences(of: "%XSHAPE%", with: xShape)
+            .replacingOccurrences(of: "%CLASSES%", with: classes)
+    }
+
+    @Test func saveBeforeFitThrows() throws {
+        let model = try DecisionTree(maxDepth: 2)
+        let url = temporaryJSONURL("unfitted-tree")
+        defer { try? FileManager.default.removeItem(at: url) }
+
+        var didThrow = false
+        do {
+            try model.saveFittedState(to: url)
+        } catch {
+            didThrow = true
+            #expect((error as? SwiftMachinaError) == .notFitted("DecisionTree must be fitted before saving"))
+        }
+        #expect(didThrow)
+    }
+
+    @Test func schemaVersionMismatchThrows() throws {
+        try expectLoadThrows(
+            KNN.self,
+            json: knnJSON(version: 2),
+            prefix: "knn-bad-version",
+            .unsupported("Unsupported fitted-state schema version 2; expected 1")
+        )
+    }
+
+    @Test func modelTypeMismatchThrows() throws {
+        try expectLoadThrows(
+            KNN.self,
+            json: knnJSON(modelType: "NotKNN"),
+            prefix: "knn-bad-type",
+            .unsupported("Fitted-state modelType does not match KNN")
+        )
+    }
+
+    @Test func negativeArrayShapeThrows() throws {
+        // (-2) * (-2) == 4 matches the value count, so only an explicit
+        // non-negativity check rejects this payload.
+        try expectLoadThrows(
+            KNN.self,
+            json: knnJSON(xShape: "[-2,-2]"),
+            prefix: "knn-negative-shape",
+            .invalidShape("Array payload dimensions must be non-negative")
+        )
+    }
+
+    @Test func emptyClassesThrows() throws {
+        try expectLoadThrows(
+            KNN.self,
+            json: knnJSON(classes: "[]"),
+            prefix: "knn-empty-classes",
+            .notFitted("KNN fitted state must contain classes")
+        )
+    }
+
+    @Test func classesMissingTrainLabelThrows() throws {
+        try expectLoadThrows(
+            KNN.self,
+            json: knnJSON(classes: "[0]"),
+            prefix: "knn-missing-class",
+            .invalidParameter("KNN classes must include every yTrain label")
+        )
+    }
+
+    @Test func duplicateClassValuesThrows() throws {
+        let json = """
+        {"schemaVersion":1,"modelType":"DecisionTree","maxDepth":2,"minSamplesSplit":2,\
+        "minSamplesLeaf":1,"minImpurityDecrease":0,"randomThresholds":false,\
+        "nFeatures":2,"classValues":[1,1],"root":{"value":1}}
+        """
+        try expectLoadThrows(
+            DecisionTree.self,
+            json: json,
+            prefix: "tree-duplicate-classes",
+            .invalidShape("DecisionTree class values must be unique")
+        )
+    }
+
+    @Test func outOfRangeFeatureIndexThrows() throws {
+        let json = """
+        {"schemaVersion":1,"modelType":"DecisionTree","maxDepth":2,"minSamplesSplit":2,\
+        "minSamplesLeaf":1,"minImpurityDecrease":0,"randomThresholds":false,\
+        "nFeatures":2,"classValues":[0,1],\
+        "root":{"value":0,"feature":5,"threshold":0.5,"left":{"value":0},"right":{"value":1}}}
+        """
+        try expectLoadThrows(
+            DecisionTree.self,
+            json: json,
+            prefix: "tree-feature-out-of-range",
+            .invalidShape("DecisionTree node feature index must be in 0..<2")
+        )
+    }
+
+    @Test func incompleteSplitNodeThrows() throws {
+        let json = """
+        {"schemaVersion":1,"modelType":"DecisionTree","maxDepth":2,"minSamplesSplit":2,\
+        "minSamplesLeaf":1,"minImpurityDecrease":0,"randomThresholds":false,\
+        "nFeatures":2,"classValues":[0,1],\
+        "root":{"value":0,"feature":1,"threshold":0.5,"left":{"value":0}}}
+        """
+        try expectLoadThrows(
+            DecisionTree.self,
+            json: json,
+            prefix: "tree-incomplete-split",
+            .invalidShape("DecisionTree node must be either a leaf or a complete split")
+        )
+    }
+
+    @Test func weightShapeMismatchThrows() throws {
+        let json = """
+        {"schemaVersion":1,"modelType":"LogisticRegression","inputSize":2,"epochs":10,\
+        "learningRate":0.1,"weight":{"shape":[1,5],"values":[1,2,3,4,5]},\
+        "bias":{"shape":[1],"values":[0]}}
+        """
+        try expectLoadThrows(
+            LogisticRegression.self,
+            json: json,
+            prefix: "logreg-weight-shape",
+            .invalidShape("LogisticRegression weight must have shape [1, inputSize]")
+        )
+    }
+
+    @Test func nonFiniteValuesAreRejectedOnEncode() throws {
+        let array = try SwiftMachinaArray(shape: [2], values: [1.0, Float.nan])
+
+        var didThrow = false
+        do {
+            _ = try JSONEncoder().encode(array)
+        } catch {
+            didThrow = true
+            #expect(
+                (error as? SwiftMachinaError) == .invalidParameter("Fitted-state arrays must contain only finite values")
+            )
+        }
+        #expect(didThrow)
+    }
+}

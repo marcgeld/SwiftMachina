@@ -467,29 +467,23 @@ public struct DecisionTree: Classifier {
     }
 }
 
-extension DecisionTree: FittedStatePersistable {
-    public final class NodeState: Codable {
-        public let prediction: Float
-        public let feature: Int?
-        public let threshold: Float?
-        public let left: NodeState?
-        public let right: NodeState?
+extension DecisionTree.Node: TreeNodeRepresentable {
+    var nodeValue: Float { prediction }
+    var nodeFeature: Int? { feature }
+    var nodeThreshold: Float? { threshold }
+    var nodeLeft: DecisionTree.Node? { left }
+    var nodeRight: DecisionTree.Node? { right }
 
-        public init(
-            prediction: Float,
-            feature: Int? = nil,
-            threshold: Float? = nil,
-            left: NodeState? = nil,
-            right: NodeState? = nil
-        ) {
-            self.prediction = prediction
-            self.feature = feature
-            self.threshold = threshold
-            self.left = left
-            self.right = right
-        }
+    convenience init(leafValue: Float) {
+        self.init(prediction: leafValue)
     }
 
+    convenience init(value: Float, feature: Int, threshold: Float, left: DecisionTree.Node, right: DecisionTree.Node) {
+        self.init(prediction: value, feature: feature, threshold: threshold, left: left, right: right)
+    }
+}
+
+extension DecisionTree: FittedStatePersistable {
     public struct FittedState: Codable {
         public let schemaVersion: Int
         public let modelType: String
@@ -502,7 +496,7 @@ extension DecisionTree: FittedStatePersistable {
         public let randomState: UInt64?
         public let nFeatures: Int
         public let classValues: [Float]
-        public let root: NodeState
+        public let root: TreeNodeState
     }
 
     public func fittedState() throws -> FittedState {
@@ -511,7 +505,7 @@ extension DecisionTree: FittedStatePersistable {
         }
 
         return FittedState(
-            schemaVersion: 1,
+            schemaVersion: fittedStateSchemaVersion,
             modelType: "DecisionTree",
             maxDepth: maxDepth,
             minSamplesSplit: minSamplesSplit,
@@ -522,7 +516,7 @@ extension DecisionTree: FittedStatePersistable {
             randomState: randomState,
             nFeatures: nFeatures,
             classValues: classValues,
-            root: Self.encode(root)
+            root: TreeNodeState(encoding: root)
         )
     }
 
@@ -543,41 +537,16 @@ extension DecisionTree: FittedStatePersistable {
         )
         try require(fittedState.nFeatures > 0, .invalidShape("nFeatures must be greater than zero"))
         try require(!fittedState.classValues.isEmpty, .notFitted("DecisionTree fitted state must contain class values"))
+        try require(
+            Set(fittedState.classValues).count == fittedState.classValues.count,
+            .invalidShape("DecisionTree class values must be unique")
+        )
+        try fittedState.root.validate(nFeatures: fittedState.nFeatures, model: "DecisionTree")
 
         self.nFeatures = fittedState.nFeatures
         self.classValues = fittedState.classValues
         self.classIndex = Dictionary(uniqueKeysWithValues: fittedState.classValues.enumerated().map { ($1, $0) })
-        self.root = try Self.decode(fittedState.root)
-    }
-
-    private static func encode(_ node: Node) -> NodeState {
-        NodeState(
-            prediction: node.prediction,
-            feature: node.feature,
-            threshold: node.threshold,
-            left: node.left.map(encode),
-            right: node.right.map(encode)
-        )
-    }
-
-    private static func decode(_ state: NodeState) throws -> Node {
-        if let feature = state.feature,
-           let threshold = state.threshold,
-           let left = state.left,
-           let right = state.right {
-            return Node(
-                prediction: state.prediction,
-                feature: feature,
-                threshold: threshold,
-                left: try decode(left),
-                right: try decode(right)
-            )
-        }
-
-        try require(
-            state.feature == nil && state.threshold == nil && state.left == nil && state.right == nil,
-            .invalidShape("DecisionTree node must be either a leaf or a complete split")
-        )
-        return Node(prediction: state.prediction)
+        let root: Node = fittedState.root.decodedNode()
+        self.root = root
     }
 }

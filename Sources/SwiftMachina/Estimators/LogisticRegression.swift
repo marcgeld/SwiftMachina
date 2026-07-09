@@ -110,7 +110,7 @@ extension LogisticRegression: FittedStatePersistable {
     public func fittedState() throws -> FittedState {
         try require(isFitted, .notFitted("LogisticRegression must be fitted before saving"))
         return FittedState(
-            schemaVersion: 1,
+            schemaVersion: fittedStateSchemaVersion,
             modelType: "LogisticRegression",
             inputSize: inputSize,
             epochs: epochs,
@@ -130,13 +130,20 @@ extension LogisticRegression: FittedStatePersistable {
         try require(fittedState.epochs >= 0, .invalidParameter("epochs must be non-negative"))
         try require(fittedState.learningRate > 0, .invalidParameter("learningRate must be greater than zero"))
 
+        let weight = try fittedState.weight.mlxArray()
+        try require(
+            weight.shape == [1, fittedState.inputSize],
+            .invalidShape("LogisticRegression weight must have shape [1, inputSize]")
+        )
+        let bias = try fittedState.bias?.mlxArray()
+        if let bias {
+            try require(bias.shape == [1], .invalidShape("LogisticRegression bias must have shape [1]"))
+        }
+
         self.inputSize = fittedState.inputSize
         self.epochs = fittedState.epochs
         self.learningRate = fittedState.learningRate
-        self.linear = Linear(
-            weight: try fittedState.weight.mlxArray(),
-            bias: try fittedState.bias?.mlxArray()
-        )
+        self.linear = Linear(weight: weight, bias: bias)
         self.isFitted = true
     }
 }

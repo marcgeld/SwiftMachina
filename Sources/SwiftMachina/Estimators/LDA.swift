@@ -106,7 +106,7 @@ extension LDA: FittedStatePersistable {
         }
 
         return FittedState(
-            schemaVersion: 1,
+            schemaVersion: fittedStateSchemaVersion,
             modelType: "LDA",
             classes: classes,
             means: means.map(SwiftMachinaArray.init),
@@ -128,9 +128,22 @@ extension LDA: FittedStatePersistable {
             .invalidShape("LDA fitted state arrays must match class count")
         )
 
+        let invCov = try fittedState.invCov.mlxArray()
+        try require(
+            invCov.shape.count == 2 && invCov.shape[0] == invCov.shape[1] && invCov.shape[0] > 0,
+            .invalidShape("LDA invCov must be a square 2D matrix")
+        )
+        let means = try fittedState.means.map { try $0.mlxArray() }
+        for mean in means {
+            try require(
+                mean.shape == [invCov.shape[0]],
+                .invalidShape("LDA means must match the invCov dimension")
+            )
+        }
+
         self.classes = fittedState.classes
-        self.means = try fittedState.means.map { try $0.mlxArray() }
+        self.means = means
         self.priors = fittedState.priors
-        self.invCov = try fittedState.invCov.mlxArray()
+        self.invCov = invCov
     }
 }
